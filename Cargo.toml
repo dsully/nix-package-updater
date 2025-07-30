@@ -1,0 +1,122 @@
+[package]
+name = "nix-package-updater"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "nix-package-updater"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["color", "derive"] }
+clap_complete = "4.5"
+colored = "3"
+indicatif = "0"
+octocrab = "0.44"
+rayon = "1.10"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+rnix = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+vergen-pretty = { version = "1", features = ["color"] }
+walkdir = "2.5"
+
+[build-dependencies]
+bosion = "1"
+vergen-gitcl = { version = "1", features = [
+  "build",
+  "cargo",
+  "rustc",
+  "si",
+] }
+
+# https://stackoverflow.com/a/74545562/81120
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+# Warn-level lints
+await_holding_lock = "warn"
+# Allowed lints
+cargo_common_metadata = { level = "allow", priority = 1 }
+char_lit_as_u8 = "warn"
+checked_conversions = "warn"
+complexity = { level = "deny", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+dbg_macro = "warn"
+debug_assert_with_mut_call = "warn"
+doc_markdown = { level = "allow", priority = 1 }
+empty_enum = "warn"
+empty_line_after_doc_comments = "allow"
+empty_line_after_outer_attr = "allow"
+enum_glob_use = "warn"
+expl_impl_clone_on_copy = "warn"
+explicit_deref_methods = "warn"
+explicit_into_iter_loop = "warn"
+fallible_impl_from = "warn"
+filter_map_next = "warn"
+flat_map_option = "warn"
+float_cmp_const = "warn"
+fn_params_excessive_bools = "warn"
+from_iter_instead_of_collect = "warn"
+if_let_mutex = "warn"
+implicit_clone = "warn"
+implicit_return = { level = "allow", priority = 1 }
+imprecise_flops = "warn"
+inefficient_to_string = "warn"
+invalid_upcast_comparisons = "warn"
+large_digit_groups = "warn"
+large_stack_arrays = "warn"
+large_types_passed_by_value = "warn"
+let_unit_value = "warn"
+linkedlist = "warn"
+lossy_float_literal = "warn"
+macro_use_imports = "warn"
+manual_ok_or = "warn"
+map_flatten = "warn"
+map_unwrap_or = "warn"
+match_same_arms = "warn"
+match_wild_err_arm = "warn"
+match_wildcard_for_single_variants = "warn"
+mem_forget = "warn"
+missing_enforced_import_renames = "warn"
+missing_errors_doc = { level = "allow", priority = 1 }
+missing_panics_doc = { level = "allow", priority = 1 }
+module_name_repetitions = { level = "allow", priority = 1 }
+mut_mut = "warn"
+mutex_integer = "warn"
+needless_borrow = "warn"
+needless_continue = "warn"
+needless_for_each = "warn"
+option_option = "warn"
+path_buf_push_overwrite = "warn"
+pedantic = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+ptr_as_ptr = "warn"
+rc_mutex = "warn"
+ref_option_ref = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+same_functions_in_if_condition = "warn"
+semicolon_if_nothing_returned = "warn"
+single_match_else = "warn"
+string_add = "warn"
+string_add_assign = "warn"
+string_lit_as_bytes = "warn"
+string_to_string = "warn"
+struct_excessive_bools = "allow"
+style = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+trait_duplication_in_bounds = "warn"
+unnested_or_patterns = "warn"
+unused_self = "warn"
+useless_transmute = "warn"
+verbose_file_reads = "warn"
+zero_sized_map_values = "warn"
+
+[lints.rust]
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[profile.release]
+opt-level = 3
+lto = true
+
