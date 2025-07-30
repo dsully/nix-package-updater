@@ -365,9 +365,9 @@ impl super::NixPackageUpdater {
 
     fn update_cargo_or_vendor_hash(package: &Package, hash_type: &str, pb: Option<&ProgressBar>) -> Result<()> {
         if let Some(pb) = pb {
-            pb.set_message(format!("Building to get new {hash_type}Hash..."));
+            pb.set_message(format!("{}: Building to get new {hash_type}Hash...", package.name));
         } else {
-            println!("{}", format!("Building to get new {hash_type}Hash...").yellow());
+            println!("{}", format!("{}: Building to get new {hash_type}Hash...", package.name).yellow());
         }
 
         let output = Command::new("nix").args(["build", &format!(".#{}", package.name), "--no-link"]).output()?;

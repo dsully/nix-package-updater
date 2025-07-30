@@ -97,8 +97,6 @@ pub fn update_platform_hashes(content: &str, releases: &[PyPiReleaseFile], _sour
                     // Get new hash
                     if let Some(new_hash) = get_nix_hash(&url)? {
                         new_content = update_attr_value(&new_content, "hash", old_hash, &new_hash);
-
-                        println!("  {old_hash} -> {new_hash}");
                     } else {
                         eprintln!("{}", format!("Failed to get hash for platform {}", block.platform_name).red());
                     }
@@ -148,10 +146,6 @@ pub fn update_platform_hashes_github(content: &str, release_data: &serde_json::V
                         let new_platform_block = update_attr_value(&platform_block, "hash", &old_hash, &new_hash);
 
                         new_content = new_content.replace(&platform_block, &new_platform_block);
-
-                        println!("Updated hash for platform {platform_name}");
-
-                        println!("  {old_hash} -> {new_hash}");
                     }
                 } else {
                     eprintln!("{}", format!("Failed to get hash for {platform_name}").red());
@@ -173,13 +167,9 @@ pub fn update_platform_hashes_github(content: &str, release_data: &serde_json::V
                     filename
                 );
 
-                println!("Updating hash for file {filename}");
-
                 // Get new hash
                 if let Some(new_hash) = get_nix_hash(&url)? {
                     new_content = update_attr_value(&new_content, "hash", old_hash, &new_hash);
-
-                    println!("  {old_hash} -> {new_hash}");
                 } else {
                     eprintln!("{}", format!("Failed to get hash for {filename}").red());
                 }
