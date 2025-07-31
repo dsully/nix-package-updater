@@ -112,7 +112,7 @@ impl NixPackageUpdater {
                         });
 
                         // Build package
-                        let build_success = nix::build_package(package, &build_results_dir, self.cache, &config).unwrap_or(false);
+                        let build_success = nix::build_package(package, Some(&pb), &build_results_dir, self.cache, &config).unwrap_or(false);
 
                         (update_outcome, build_success)
                     }

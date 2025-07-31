@@ -4,10 +4,12 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use indicatif::ProgressBar;
+
 use crate::config::Config;
 use crate::package::Package;
 
-pub fn build_package(package: &Package, build_results_dir: &Path, cache: bool, config: &Config) -> Result<bool> {
+pub fn build_package(package: &Package, pb: Option<&ProgressBar>, build_results_dir: &Path, cache: bool, config: &Config) -> Result<bool> {
     fs::create_dir_all(build_results_dir)?;
 
     let log_file = build_results_dir.join(format!("{}.log", package.name));
@@ -24,7 +26,7 @@ pub fn build_package(package: &Package, build_results_dir: &Path, cache: bool, c
 
     if output.status.success() {
         if cache {
-            push_to_cachix(package, config)?;
+            push_to_cachix(package, pb, config)?;
         }
 
         Ok(true)
@@ -33,8 +35,13 @@ pub fn build_package(package: &Package, build_results_dir: &Path, cache: bool, c
     }
 }
 
-pub fn push_to_cachix(package: &Package, config: &Config) -> Result<()> {
-    println!("{}", format!("Pushing {} to cachix...", package.name).cyan());
+pub fn push_to_cachix(package: &Package, pb: Option<&ProgressBar>, config: &Config) -> Result<()> {
+    //
+    if let Some(pb) = pb {
+        pb.set_message(format!("Pushing {} to cachix...", package.name));
+    } else {
+        println!("{}", format!("Pushing {} to cachix...", package.name).cyan());
+    }
 
     let output = Command::new("nix").args(["path-info", &format!(".#{}", package.name)]).output()?;
 
