@@ -67,10 +67,14 @@ impl super::NixPackageUpdater {
                         continue;
                     };
 
+                    // Extract homepage if available
+                    let homepage = find_attr_value(&root, "homepage");
+
                     packages.push(Package {
                         name: pname,
                         file_path: path.to_path_buf(),
                         kind: package_type,
+                        homepage,
                     });
 
                     found_files.insert(path_str.to_string());

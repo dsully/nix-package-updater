@@ -30,7 +30,7 @@ impl super::NixPackageUpdater {
                 success: false,
                 old_version: None,
                 new_version: None,
-                message: Some(format!("Package '{}' not found on PyPI", package.name)),
+                message: Some(format!("Package '{}' not found on PyPI", package.display_name())),
             });
         };
 
@@ -365,9 +365,9 @@ impl super::NixPackageUpdater {
 
     fn update_cargo_or_vendor_hash(package: &Package, hash_type: &str, pb: Option<&ProgressBar>) -> Result<()> {
         if let Some(pb) = pb {
-            pb.set_message(format!("{}: Building to get new {hash_type}Hash...", package.name));
+            pb.set_message(format!("{}: Building to get new {hash_type}Hash...", package.display_name()));
         } else {
-            println!("{}", format!("{}: Building to get new {hash_type}Hash...", package.name).yellow());
+            println!("{}", format!("{}: Building to get new {hash_type}Hash...", package.display_name()).yellow());
         }
 
         let output = Command::new("nix").args(["build", &format!(".#{}", package.name), "--no-link"]).output()?;

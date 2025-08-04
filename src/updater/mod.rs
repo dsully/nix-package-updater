@@ -96,7 +96,7 @@ impl NixPackageUpdater {
 
                 pb.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
 
-                pb.set_message(format!("Processing {}...", package.name));
+                pb.set_message(format!("Processing {}...", package.display_name()));
 
                 // Create a new updater instance for this thread
                 let new_updater = NixPackageUpdater::new(self.packages.clone(), self.update, self.force, self.cache, self.verbose);
@@ -157,9 +157,20 @@ impl NixPackageUpdater {
                 details.push(msg.clone());
             }
 
+            // Create hyperlinked package name if homepage is available
+            let package_name_display = package.display_name();
+            let package_name_width = package.display_width();
+            
+            // Manually pad the package name to account for escape sequences
+            let package_name_padded = if package_name_width < 30 {
+                format!("{}{}", package_name_display, " ".repeat(30 - package_name_width))
+            } else {
+                package_name_display
+            };
+
             println!(
-                "{:<30} {:<15} {:<10} {:<10} {}",
-                package.name.cyan(),
+                "{} {:<15} {:<10} {:<10} {}",
+                package_name_padded,
                 package.kind.to_string().magenta(),
                 update_status.yellow(),
                 build_status.green(),

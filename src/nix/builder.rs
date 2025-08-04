@@ -38,9 +38,9 @@ pub fn build_package(package: &Package, pb: Option<&ProgressBar>, build_results_
 pub fn push_to_cachix(package: &Package, pb: Option<&ProgressBar>, config: &Config) -> Result<()> {
     //
     if let Some(pb) = pb {
-        pb.set_message(format!("Pushing {} to cachix...", package.name));
+        pb.set_message(format!("Pushing {} to cachix...", package.display_name()));
     } else {
-        println!("{}", format!("Pushing {} to cachix...", package.name).cyan());
+        println!("{}", format!("Pushing {} to cachix...", package.display_name()).cyan());
     }
 
     let output = Command::new("nix").args(["path-info", &format!(".#{}", package.name)]).output()?;
