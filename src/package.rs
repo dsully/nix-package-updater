@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use colored::Colorize;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageKind {

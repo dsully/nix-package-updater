@@ -16,13 +16,13 @@ use clap::{Command, CommandFactory, Parser, Subcommand};
 use clap_complete::{Generator, Shell, generate};
 use colored::Colorize;
 use std::io;
-use vergen_pretty::{PrettyBuilder, vergen_pretty_env};
 
 use crate::updater::NixPackageUpdater;
 
 #[derive(Parser)]
 #[command(
     name = "nix-updater",
+    version,
     about = "Update and build Nix packages from various sources",
     long_about = r#"Nix Package Updater
 
@@ -94,7 +94,6 @@ enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
-    Version,
 }
 
 fn print_completions<G: Generator>(generator: G, cmd: &mut Command) {
@@ -111,18 +110,6 @@ fn main() -> Result<()> {
         eprintln!("Generating completion file for {shell}...");
 
         print_completions(shell, &mut cmd);
-
-        return Ok(());
-    }
-
-    if let Some(Commands::Version) = cli.command {
-        let version = env!("CARGO_PKG_VERSION");
-
-        let mut out = Vec::new();
-        PrettyBuilder::default().env(vergen_pretty_env!()).build()?.display(&mut out)?;
-
-        println!("{:>28}: {version}", "Version");
-        println!("{}", std::str::from_utf8(&out)?);
 
         return Ok(());
     }

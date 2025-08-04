@@ -160,7 +160,7 @@ impl NixPackageUpdater {
             // Create hyperlinked package name if homepage is available
             let package_name_display = package.display_name();
             let package_name_width = package.display_width();
-            
+
             // Manually pad the package name to account for escape sequences
             let package_name_padded = if package_name_width < 30 {
                 format!("{}{}", package_name_display, " ".repeat(30 - package_name_width))
