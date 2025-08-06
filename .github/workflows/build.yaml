@@ -17,7 +17,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Clippy
     - run: cargo clippy -- --no-deps -Wclippy::complexity -Wclippy::correctness -Wclippy::pedantic -Wclippy::perf -Wclippy::style -Wclippy::suspicious -Aclippy::doc_markdown -Aclippy::missing_errors_doc -Aclippy::missing_panics_doc
     - name: Build
       run: cargo build --verbose
