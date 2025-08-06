@@ -2,6 +2,8 @@
 name = "nix-package-updater"
 version = "0.1.2"
 edition = "2024"
+homepage = "https://github.com/dsully/zoned"
+repository = "https://github.com/dsully/zoned"
 
 [[bin]]
 name = "nix-package-updater"
@@ -109,4 +111,17 @@ rust_2018_idioms = { level = "deny", priority = -1 }
 [profile.release]
 opt-level = 3
 lto = true
+incremental = true
 
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+[profile.dev]
+debug = 1
+lto = "off"
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 3
