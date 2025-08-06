@@ -25,7 +25,7 @@ impl GitHubClient {
         Ok(Self { client, runtime })
     }
 
-    pub fn get_latest_release(&self, owner: &str, repo: &str) -> Result<Option<String>> {
+    pub fn latest_release(&self, owner: &str, repo: &str) -> Result<Option<String>> {
         self.runtime.block_on(async {
             match self.client.repos(owner, repo).releases().get_latest().await {
                 Ok(release) => Ok(Some(release.tag_name)),
@@ -35,7 +35,21 @@ impl GitHubClient {
         })
     }
 
-    pub fn get_latest_commit(&self, owner: &str, repo: &str) -> Result<Option<String>> {
+    pub fn latest_tag(&self, owner: &str, repo: &str) -> Result<Option<(String, String)>> {
+        self.runtime.block_on(async {
+            // Get all tags sorted by commit date
+            let tags = self.client.repos(owner, repo).list_tags().send().await?;
+
+            if let Some(tag) = tags.items.first() {
+                // Return both tag name and commit SHA
+                Ok(Some((tag.name.clone(), tag.commit.sha.clone())))
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
+    pub fn latest_commit(&self, owner: &str, repo: &str) -> Result<Option<String>> {
         self.runtime.block_on(async {
             match self
                 .client

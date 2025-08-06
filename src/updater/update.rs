@@ -122,7 +122,7 @@ impl super::NixPackageUpdater {
         };
 
         // Get latest release using octocrab
-        let Some(latest_tag) = self.github_client.get_latest_release(owner, repo_name)? else {
+        let Some(latest_tag) = self.github_client.latest_release(owner, repo_name)? else {
             return Ok(UpdateResult {
                 success: false,
                 old_version: None,
@@ -166,7 +166,6 @@ impl super::NixPackageUpdater {
     pub fn update_rust_package(&mut self, package: &Package, pb: Option<&ProgressBar>) -> Result<UpdateResult> {
         let content = fs::read_to_string(&package.file_path)?;
 
-        // Extract repo info from fetchFromGitHub
         let (owner, repo) = extract_github_info(&package.file_path)?;
 
         if owner.is_none() || repo.is_none() {
@@ -179,10 +178,10 @@ impl super::NixPackageUpdater {
         }
 
         let owner = owner.unwrap();
-
         let repo = repo.unwrap();
 
-        // Get current rev using AST
+        // Get current version and rev using AST
+        let current_version = extract_field_from_ast(&package.file_path, "version")?;
         let Some(current_rev) = extract_field_from_ast(&package.file_path, "rev")? else {
             return Ok(UpdateResult {
                 success: false,
@@ -192,21 +191,29 @@ impl super::NixPackageUpdater {
             });
         };
 
-        // Get latest commit using octocrab
-        let Some(latest_rev) = self.github_client.get_latest_commit(&owner, &repo)? else {
-            return Ok(UpdateResult {
-                success: false,
-                old_version: None,
-                new_version: None,
-                message: Some("Failed to fetch latest commit".to_string()),
-            });
+        // Try to get latest tag first, fall back to latest commit
+        let (latest_version, latest_rev) = if let Some((tag_name, tag_sha)) = self.github_client.latest_tag(&owner, &repo)? {
+            // Extract version from tag (remove 'v' prefix if present)
+            let version = tag_name.trim_start_matches('v').to_string();
+            (Some(version), tag_sha)
+        } else {
+            // Fall back to latest commit if no tags
+            let Some(commit_sha) = self.github_client.latest_commit(&owner, &repo)? else {
+                return Ok(UpdateResult {
+                    success: false,
+                    old_version: None,
+                    new_version: None,
+                    message: Some("Failed to fetch latest commit".to_string()),
+                });
+            };
+            (None, commit_sha)
         };
 
         if current_rev == latest_rev && !self.force {
             return Ok(UpdateResult {
                 success: true,
-                old_version: None,
-                new_version: None,
+                old_version: current_version.clone(),
+                new_version: latest_version.clone().or(current_version.clone()),
                 message: Some("Already up to date".to_string()),
             });
         }
@@ -227,12 +234,18 @@ impl super::NixPackageUpdater {
 
         let mut new_content = Self::update_rev_and_hash(&content, Some(&current_rev), &latest_rev, &new_hash, None);
 
-        // Clear cargoHash
-        let old_cargo = r#"cargoHash = """#.to_string();
+        // Update version if we have a new one
+        if let (Some(old_ver), Some(new_ver)) = (&current_version, &latest_version) {
+            if old_ver != new_ver {
+                new_content = update_attr_value(&new_content, "version", old_ver, new_ver);
+            }
+        }
 
-        let new_cargo = r#"cargoHash = """#.to_string();
-
-        new_content = new_content.replace(&old_cargo, &new_cargo);
+        // Clear cargoHash by finding the current value and replacing with empty string
+        let ast = rnix::Root::parse(&new_content);
+        if let Some(old_cargo_hash) = find_attr_value(&ast.syntax(), "cargoHash") {
+            new_content = update_attr_value(&new_content, "cargoHash", &old_cargo_hash, "");
+        }
 
         fs::write(&package.file_path, new_content)?;
 
@@ -241,8 +254,8 @@ impl super::NixPackageUpdater {
 
         Ok(UpdateResult {
             success: true,
-            old_version: Some(current_rev[..8.min(current_rev.len())].to_string()),
-            new_version: Some(latest_rev[..8.min(latest_rev.len())].to_string()),
+            old_version: current_version.or_else(|| Some(current_rev[..8.min(current_rev.len())].to_string())),
+            new_version: latest_version.or_else(|| Some(latest_rev[..8.min(latest_rev.len())].to_string())),
             message: None,
         })
     }
@@ -388,14 +401,11 @@ impl super::NixPackageUpdater {
 
                     fs::write(&package.file_path, new_content)?;
                 } else {
-                    // If no existing hash, look for empty hash
-                    let old_pattern = format!(r#"{attr_name} = """#);
-
+                    // If no existing hash or empty hash, update it
+                    let old_pattern = format!(r#"{attr_name} = """"#);
                     let new_pattern = format!(r#"{attr_name} = "{new_hash}""#);
 
-                    let new_content = content.replace(&old_pattern, &new_pattern);
-
-                    fs::write(&package.file_path, new_content)?;
+                    fs::write(&package.file_path, content.replace(&old_pattern, &new_pattern))?;
                 }
             }
         }

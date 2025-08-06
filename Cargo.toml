@@ -1,9 +1,9 @@
 [package]
 name = "nix-package-updater"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
-homepage = "https://github.com/dsully/zoned"
-repository = "https://github.com/dsully/zoned"
+homepage = "https://github.com/dsully/nix-package-updater"
+repository = "https://github.com/dsully/nix-package-updater"
 
 [[bin]]
 name = "nix-package-updater"
