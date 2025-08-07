@@ -35,6 +35,7 @@ impl GitHubClient {
         })
     }
 
+    #[allow(dead_code)]
     pub fn latest_tag(&self, owner: &str, repo: &str) -> Result<Option<(String, String)>> {
         self.runtime.block_on(async {
             // Get all tags sorted by commit date

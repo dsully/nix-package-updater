@@ -142,12 +142,22 @@ impl super::NixPackageUpdater {
             });
         }
 
+        // Get latest commit for hash generation
+        let Some(latest_commit) = self.github_client.latest_commit(owner, repo_name)? else {
+            return Ok(UpdateResult {
+                success: false,
+                old_version: None,
+                new_version: None,
+                message: Some("Failed to get latest commit".to_string()),
+            });
+        };
+
         // Update version
         let mut new_content = update_attr_value(&content, "version", &current_version, &latest_version);
 
-        // Update platform hashes
+        // Update platform hashes using latest commit
         let release_data = serde_json::json!({
-            "tag": latest_tag,
+            "tag": latest_commit,  // Use commit SHA for hash generation
             "repo": repo,
         });
 
@@ -182,6 +192,7 @@ impl super::NixPackageUpdater {
 
         // Get current version and rev using AST
         let current_version = extract_field_from_ast(&package.file_path, "version")?;
+
         let Some(current_rev) = extract_field_from_ast(&package.file_path, "rev")? else {
             return Ok(UpdateResult {
                 success: false,
@@ -191,29 +202,44 @@ impl super::NixPackageUpdater {
             });
         };
 
-        // Try to get latest tag first, fall back to latest commit
-        let (latest_version, latest_rev) = if let Some((tag_name, tag_sha)) = self.github_client.latest_tag(&owner, &repo)? {
-            // Extract version from tag (remove 'v' prefix if present)
-            let version = tag_name.trim_start_matches('v').to_string();
-            (Some(version), tag_sha)
-        } else {
-            // Fall back to latest commit if no tags
-            let Some(commit_sha) = self.github_client.latest_commit(&owner, &repo)? else {
-                return Ok(UpdateResult {
-                    success: false,
-                    old_version: None,
-                    new_version: None,
-                    message: Some("Failed to fetch latest commit".to_string()),
-                });
-            };
-            (None, commit_sha)
+        // Get latest commit using octocrab
+        let Some(latest_rev) = self.github_client.latest_commit(&owner, &repo)? else {
+            return Ok(UpdateResult {
+                success: false,
+                old_version: None,
+                new_version: None,
+                message: Some("Failed to fetch latest commit".to_string()),
+            });
         };
+
+        // FIXME
+        let latest_version = current_version.clone();
+
+        // Try to get latest tag first, fall back to latest commit
+        // let (latest_version, latest_rev) = if let Some((tag_name, tag_sha)) = self.github_client.latest_tag(&owner, &repo)? {
+        //     // Extract version from tag (remove 'v' prefix if present)
+        //     let version = tag_name.trim_start_matches('v').to_string();
+        //     (Some(version), tag_sha)
+        // } else {
+        // Fall back to latest commit if no tags
+        // let Some(commit_sha) = self.github_client.latest_commit(&owner, &repo)? else {
+        //     return Ok(UpdateResult {
+        //         success: false,
+        //         old_version: None,
+        //         new_version: None,
+        //         message: Some("Failed to fetch latest commit".to_string()),
+        //     });
+        // };
+        //     (None, commit_sha)
+        // ;
 
         if current_rev == latest_rev && !self.force {
             return Ok(UpdateResult {
                 success: true,
-                old_version: current_version.clone(),
-                new_version: latest_version.clone().or(current_version.clone()),
+                old_version: None,
+                new_version: None,
+                // old_version: current_version.clone(),
+                // new_version: latest_version.clone().or(current_version.clone()),
                 message: Some("Already up to date".to_string()),
             });
         }
