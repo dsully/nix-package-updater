@@ -42,11 +42,10 @@ impl super::NixPackageUpdater {
                 // Look for pname attribute
                 if let Some(pname) = find_attr_value(&root, "pname") {
                     // Apply package filter if specified
-                    if let Some(ref filter) = package_filter {
-                        if !filter.iter().any(|&pkg| pname.contains(pkg)) {
+                    if let Some(ref filter) = package_filter
+                        && !filter.iter().any(|&pkg| pname.contains(pkg)) {
                             continue;
                         }
-                    }
 
                     // Skip excluded packages
                     if self.config.is_excluded(&pname) {

@@ -23,11 +23,10 @@ impl Config {
             config.cachix_name = name;
         }
 
-        if let Ok(timeout) = std::env::var("NIX_UPDATER_BUILD_TIMEOUT") {
-            if let Ok(timeout) = timeout.parse() {
+        if let Ok(timeout) = std::env::var("NIX_UPDATER_BUILD_TIMEOUT")
+            && let Ok(timeout) = timeout.parse() {
                 config.build_timeout = timeout;
             }
-        }
 
         config
     }

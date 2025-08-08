@@ -11,7 +11,6 @@ mod nix;
 mod package;
 mod updater;
 
-use anyhow::Result;
 use clap::{Command, CommandFactory, Parser, Subcommand};
 use clap_complete::{Generator, Shell, generate};
 use colored::Colorize;
@@ -100,7 +99,7 @@ fn print_completions<G: Generator>(generator: G, cmd: &mut Command) {
     generate(generator, cmd, cmd.get_name().to_string(), &mut io::stdout());
 }
 
-fn main() -> Result<()> {
+fn main() {
     let cli = Cli::parse();
 
     // Handle completions subcommand
@@ -111,7 +110,7 @@ fn main() -> Result<()> {
 
         print_completions(shell, &mut cmd);
 
-        return Ok(());
+        return;
     }
 
     // Run the main updater logic
@@ -129,6 +128,4 @@ fn main() -> Result<()> {
     };
 
     updater.run();
-
-    Ok(())
 }

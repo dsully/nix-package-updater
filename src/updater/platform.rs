@@ -78,8 +78,8 @@ pub fn update_platform_hashes(content: &str, releases: &[PyPiReleaseFile], _sour
     }
 
     for block in platform_blocks {
-        if let Some(platform_value) = block.attributes.get("platform") {
-            if let Some(old_hash) = block.attributes.get("hash") {
+        if let Some(platform_value) = block.attributes.get("platform")
+            && let Some(old_hash) = block.attributes.get("hash") {
                 // Find matching release
                 let mut url = None;
 
@@ -104,7 +104,6 @@ pub fn update_platform_hashes(content: &str, releases: &[PyPiReleaseFile], _sour
                     eprintln!("{}", format!("No wheel found for platform {platform_value}").yellow());
                 }
             }
-        }
     }
 
     Ok(new_content)
@@ -158,8 +157,8 @@ pub fn update_platform_hashes_github(content: &str, release_data: &serde_json::V
 
     // Handle structured platform data
     for block in platform_blocks {
-        if let Some(filename) = block.attributes.get("filename") {
-            if let Some(old_hash) = block.attributes.get("hash") {
+        if let Some(filename) = block.attributes.get("filename")
+            && let Some(old_hash) = block.attributes.get("hash") {
                 let url = format!(
                     "https://github.com/{}/releases/download/{}/{}",
                     release_data["repo"].as_str().unwrap(),
@@ -174,7 +173,6 @@ pub fn update_platform_hashes_github(content: &str, release_data: &serde_json::V
                     eprintln!("{}", format!("Failed to get hash for {filename}").red());
                 }
             }
-        }
     }
 
     Ok(new_content)

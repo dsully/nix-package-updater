@@ -147,11 +147,10 @@ impl NixPackageUpdater {
             // Prepare details
             let mut details = Vec::new();
 
-            if let (Some(old), Some(new)) = (&update_result.old_version, &update_result.new_version) {
-                if old != new {
+            if let (Some(old), Some(new)) = (&update_result.old_version, &update_result.new_version)
+                && old != new {
                     details.push(format!("{old} → {new}"));
                 }
-            }
 
             if let Some(msg) = &update_result.message {
                 details.push(msg.clone());

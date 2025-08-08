@@ -23,11 +23,10 @@ pub fn find_attr_value(node: &SyntaxNode, attr_name: &str) -> Option<String> {
                     for kv_child in attr_child.children() {
                         match kv_child.kind() {
                             SyntaxKind::NODE_ATTRPATH => {
-                                if let Some(ident) = kv_child.first_child() {
-                                    if ident.text() == attr_name {
+                                if let Some(ident) = kv_child.first_child()
+                                    && ident.text() == attr_name {
                                         key = Some(attr_name);
                                     }
-                                }
                             }
                             SyntaxKind::NODE_STRING => {
                                 value = Some(extract_string_value(&kv_child));
@@ -67,13 +66,11 @@ pub fn extract_string_value(node: &SyntaxNode) -> String {
 /// Check if content contains a specific function call
 pub fn contains_function_call(node: &SyntaxNode, function_name: &str) -> bool {
     for child in node.descendants() {
-        if child.kind() == SyntaxKind::NODE_APPLY {
-            if let Some(func) = child.first_child() {
-                if func.text().to_string().contains(function_name) {
+        if child.kind() == SyntaxKind::NODE_APPLY
+            && let Some(func) = child.first_child()
+                && func.text().to_string().contains(function_name) {
                     return true;
                 }
-            }
-        }
     }
 
     false
@@ -100,9 +97,9 @@ pub fn find_let_binding_or_inherit(node: &SyntaxNode, binding_name: &str) -> Opt
         // Check for let bindings
         if child.kind() == SyntaxKind::NODE_LET_IN {
             for let_child in child.children() {
-                if let_child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
-                    if let Some(ident) = let_child.first_child() {
-                        if ident.text() == binding_name {
+                if let_child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                    && let Some(ident) = let_child.first_child()
+                        && ident.text() == binding_name {
                             // Get the value after the = sign
                             for value_child in let_child.children() {
                                 if value_child.kind() == SyntaxKind::NODE_STRING {
@@ -110,8 +107,6 @@ pub fn find_let_binding_or_inherit(node: &SyntaxNode, binding_name: &str) -> Opt
                                 }
                             }
                         }
-                    }
-                }
             }
         }
 
@@ -133,13 +128,13 @@ pub fn find_let_binding_or_inherit(node: &SyntaxNode, binding_name: &str) -> Opt
 /// Find attribute value within a fetchFromGitHub call
 pub fn find_attr_in_fetch_from_github(node: &SyntaxNode, attr_name: &str) -> Option<String> {
     for child in node.descendants() {
-        if child.kind() == SyntaxKind::NODE_APPLY {
-            if let Some(func) = child.first_child() {
-                if func.text().to_string().contains("fetchFromGitHub") {
+        if child.kind() == SyntaxKind::NODE_APPLY
+            && let Some(func) = child.first_child()
+                && func.text().to_string().contains("fetchFromGitHub") {
                     // Look for the attribute set argument
                     for apply_child in child.children() {
-                        if apply_child.kind() == SyntaxKind::NODE_ATTR_SET {
-                            if let Some(value) = find_attr_value(&apply_child, attr_name) {
+                        if apply_child.kind() == SyntaxKind::NODE_ATTR_SET
+                            && let Some(value) = find_attr_value(&apply_child, attr_name) {
                                 // If the value is "pname", resolve it from the parent scope
                                 if value == "pname" && attr_name == "repo" {
                                     // Look for pname in the parent scope
@@ -150,11 +145,8 @@ pub fn find_attr_in_fetch_from_github(node: &SyntaxNode, attr_name: &str) -> Opt
 
                                 return Some(value);
                             }
-                        }
                     }
                 }
-            }
-        }
     }
 
     None
@@ -184,9 +176,9 @@ pub fn find_platform_blocks(content: &str) -> Vec<(String, String)> {
     for node in root.descendants() {
         if node.kind() == SyntaxKind::NODE_ATTR_SET {
             // Look for pattern like: platform-name = { ... }
-            if let Some(parent) = node.parent() {
-                if parent.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
-                    if let Some(key_node) = parent.children().find(|n| n.kind() == SyntaxKind::NODE_ATTRPATH) {
+            if let Some(parent) = node.parent()
+                && parent.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                    && let Some(key_node) = parent.children().find(|n| n.kind() == SyntaxKind::NODE_ATTRPATH) {
                         let platform_name = key_node.text().to_string();
 
                         if platform_name.contains('-') {
@@ -195,8 +187,6 @@ pub fn find_platform_blocks(content: &str) -> Vec<(String, String)> {
                             platforms.push((platform_name, block_text));
                         }
                     }
-                }
-            }
         }
     }
 
@@ -216,8 +206,8 @@ pub fn find_platform_data_blocks(node: &SyntaxNode) -> Vec<PlatformBlock> {
     let mut blocks = Vec::new();
 
     for child in node.descendants() {
-        if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
-            if let Some(attr_path) = child.first_child() {
+        if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+            && let Some(attr_path) = child.first_child() {
                 let attr_name = attr_path.text().to_string();
 
                 if attr_name == "platformData" || attr_name == "dists" {
@@ -227,8 +217,8 @@ pub fn find_platform_data_blocks(node: &SyntaxNode) -> Vec<PlatformBlock> {
                             // This is the platformData/dists attr set
                             // Look for individual platform entries (direct children only)
                             for platform_entry in value_node.children() {
-                                if platform_entry.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
-                                    if let Some(platform_name_node) = platform_entry.first_child() {
+                                if platform_entry.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                                    && let Some(platform_name_node) = platform_entry.first_child() {
                                         let platform_name = platform_name_node.text().to_string();
 
                                         // Extract attributes from this platform's attr set
@@ -239,8 +229,8 @@ pub fn find_platform_data_blocks(node: &SyntaxNode) -> Vec<PlatformBlock> {
                                             if platform_value.kind() == SyntaxKind::NODE_ATTR_SET {
                                                 // Find filename, hash, platform attributes
                                                 for attr in platform_value.children() {
-                                                    if attr.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
-                                                        if let Some(attr_name_node) = attr.first_child() {
+                                                    if attr.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                                                        && let Some(attr_name_node) = attr.first_child() {
                                                             let attr_name = attr_name_node.text().to_string();
 
                                                             // Get the value of this attribute
@@ -254,7 +244,6 @@ pub fn find_platform_data_blocks(node: &SyntaxNode) -> Vec<PlatformBlock> {
                                                                 }
                                                             }
                                                         }
-                                                    }
                                                 }
                                             }
                                         }
@@ -266,7 +255,6 @@ pub fn find_platform_data_blocks(node: &SyntaxNode) -> Vec<PlatformBlock> {
                                             });
                                         }
                                     }
-                                }
                             }
 
                             break; // Don't look deeper
@@ -274,7 +262,6 @@ pub fn find_platform_data_blocks(node: &SyntaxNode) -> Vec<PlatformBlock> {
                     }
                 }
             }
-        }
     }
 
     blocks

@@ -52,58 +52,40 @@ impl GitHubClient {
 
     pub fn latest_commit(&self, owner: &str, repo: &str) -> Result<Option<String>> {
         self.runtime.block_on(async {
-            match self
-                .client
-                .repos(owner, repo)
-                .get_ref(&octocrab::params::repos::Reference::Branch("HEAD".to_string()))
-                .await
-            {
-                Ok(git_ref) => {
-                    // The object field contains the SHA in a different structure
-                    // For octocrab 0.44, we need to match on the object type
-                    match &git_ref.object {
+            // First try to get the default branch
+            if let Ok(repo_info) = self.client.repos(owner, repo).get().await {
+                let default_branch = repo_info.default_branch.as_deref().unwrap_or("main");
+
+                // Get the commit SHA for the default branch
+                match self
+                    .client
+                    .repos(owner, repo)
+                    .get_ref(&octocrab::params::repos::Reference::Branch(default_branch.to_string()))
+                    .await
+                {
+                    Ok(git_ref) => match &git_ref.object {
                         octocrab::models::repos::Object::Commit { sha, .. } => Ok(Some(sha.clone())),
                         _ => Ok(None),
-                    }
+                    },
+                    Err(_) => Ok(None),
                 }
-                Err(octocrab::Error::GitHub { source, .. }) if source.status_code == 404 => {
-                    // Try main branch
-                    match self
+            } else {
+                // Fallback: try common branch names
+                for branch in &["main", "master"] {
+                    let Ok(git_ref) = self
                         .client
                         .repos(owner, repo)
-                        .get_ref(&octocrab::params::repos::Reference::Branch("main".to_string()))
+                        .get_ref(&octocrab::params::repos::Reference::Branch((*branch).to_string()))
                         .await
-                    {
-                        Ok(git_ref) => {
-                            // The object field contains the SHA in a different structure
-                            // For octocrab 0.44, we need to match on the object type
-                            match &git_ref.object {
-                                octocrab::models::repos::Object::Commit { sha, .. } => Ok(Some(sha.clone())),
-                                _ => Ok(None),
-                            }
-                        }
-                        Err(_) => {
-                            // Try master branch
-                            match self
-                                .client
-                                .repos(owner, repo)
-                                .get_ref(&octocrab::params::repos::Reference::Branch("master".to_string()))
-                                .await
-                            {
-                                Ok(git_ref) => {
-                                    // The object field contains the SHA in a different structure
-                                    // For octocrab 0.44, we need to match on the object type
-                                    match &git_ref.object {
-                                        octocrab::models::repos::Object::Commit { sha, .. } => Ok(Some(sha.clone())),
-                                        _ => Ok(None),
-                                    }
-                                }
-                                Err(_) => Ok(None),
-                            }
-                        }
+                    else {
+                        continue;
+                    };
+
+                    if let octocrab::models::repos::Object::Commit { sha, .. } = &git_ref.object {
+                        return Ok(Some(sha.clone()));
                     }
                 }
-                Err(e) => Err(e.into()),
+                Ok(None)
             }
         })
     }

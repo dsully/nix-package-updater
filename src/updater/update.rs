@@ -123,11 +123,12 @@ impl super::NixPackageUpdater {
 
         // Get latest release using octocrab
         let Some(latest_tag) = self.github_client.latest_release(owner, repo_name)? else {
+            // No releases found - keep current version and hash
             return Ok(UpdateResult {
-                success: false,
-                old_version: None,
-                new_version: None,
-                message: Some("No releases found on GitHub".to_string()),
+                success: true,
+                old_version: Some(current_version.clone()),
+                new_version: Some(current_version),
+                message: Some("No releases found on GitHub - keeping current version".to_string()),
             });
         };
 
@@ -142,22 +143,12 @@ impl super::NixPackageUpdater {
             });
         }
 
-        // Get latest commit for hash generation
-        let Some(latest_commit) = self.github_client.latest_commit(owner, repo_name)? else {
-            return Ok(UpdateResult {
-                success: false,
-                old_version: None,
-                new_version: None,
-                message: Some("Failed to get latest commit".to_string()),
-            });
-        };
-
         // Update version
         let mut new_content = update_attr_value(&content, "version", &current_version, &latest_version);
 
-        // Update platform hashes using latest commit
+        // Update platform hashes using release tag
         let release_data = serde_json::json!({
-            "tag": latest_commit,  // Use commit SHA for hash generation
+            "tag": latest_tag,  // Use release tag for hash generation
             "repo": repo,
         });
 
@@ -261,11 +252,10 @@ impl super::NixPackageUpdater {
         let mut new_content = Self::update_rev_and_hash(&content, Some(&current_rev), &latest_rev, &new_hash, None);
 
         // Update version if we have a new one
-        if let (Some(old_ver), Some(new_ver)) = (&current_version, &latest_version) {
-            if old_ver != new_ver {
+        if let (Some(old_ver), Some(new_ver)) = (&current_version, &latest_version)
+            && old_ver != new_ver {
                 new_content = update_attr_value(&new_content, "version", old_ver, new_ver);
             }
-        }
 
         // Clear cargoHash by finding the current value and replacing with empty string
         let ast = rnix::Root::parse(&new_content);
@@ -369,22 +359,20 @@ impl super::NixPackageUpdater {
         let mut new_content = content.to_string();
 
         // Update rev
-        if let Some(old_rev) = old_rev {
-            if !new_rev.is_empty() {
+        if let Some(old_rev) = old_rev
+            && !new_rev.is_empty() {
                 new_content = update_attr_value(&new_content, "rev", old_rev, new_rev);
 
                 // Update version if it contains rev
                 let ast = rnix::Root::parse(&new_content);
 
-                if let Some(current_version) = find_attr_value(&ast.syntax(), "version") {
-                    if current_version.contains(old_rev) {
+                if let Some(current_version) = find_attr_value(&ast.syntax(), "version")
+                    && current_version.contains(old_rev) {
                         let new_version = current_version.replace(old_rev, new_rev);
 
                         new_content = update_attr_value(&new_content, "version", &current_version, &new_version);
                     }
-                }
             }
-        }
 
         // Update hash
         let old_hash = if let Some(h) = old_hash {
