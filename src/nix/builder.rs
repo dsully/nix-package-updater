@@ -55,18 +55,3 @@ pub fn push_to_cachix(package: &Package, pb: Option<&ProgressBar>, cachix: &str)
 
     Ok(())
 }
-
-/// Extract capture group from error output
-pub fn extract_hash_from_error(stderr: &str) -> Option<String> {
-    if let Some(pos) = stderr.find("got:") {
-        let after_got = &stderr[pos + 4..].trim();
-
-        if let Some(end) = after_got.find(|c: char| c.is_whitespace()) {
-            return Some(after_got[..end].to_string());
-        }
-
-        return Some((*after_got).to_string());
-    }
-
-    None
-}

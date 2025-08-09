@@ -32,7 +32,7 @@ impl NixPackageUpdater {
 
         // Check if we need to update cargo/vendor hash before writing
         if ast.get("cargoHash").is_some() {
-            ast.update_vendor(&package.display_name(), &package.path, "cargo", pb)?;
+            ast.update_vendor(package, "cargo", pb)?;
         }
 
         Self::write(&ast, package)?;

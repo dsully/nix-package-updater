@@ -9,7 +9,7 @@ use rnix::{Parse, Root, SyntaxKind, SyntaxNode};
 
 use crate::clients::PyPiReleaseFile;
 use crate::clients::nix::Nix;
-use crate::nix::builder::extract_hash_from_error;
+use crate::package::Package;
 
 #[derive(Debug)]
 pub struct PlatformBlock {
@@ -19,14 +19,7 @@ pub struct PlatformBlock {
 
 /// Extract string value from a Nix string node
 fn extract_string_value(node: &SyntaxNode) -> String {
-    let text = node.text().to_string();
-
-    // Remove quotes
-    if text.starts_with('"') && text.ends_with('"') {
-        text[1..text.len() - 1].to_string()
-    } else {
-        text
-    }
+    node.text().to_string().replace('"', "")
 }
 
 /// AST Updater that maintains the parse tree and applies updates
@@ -73,20 +66,17 @@ impl Ast {
                             }
                         }
                         SyntaxKind::NODE_STRING => {
-                            if found_attr {
-                                let current_value = extract_string_value(&attr_child);
-                                if current_value == old_value {
-                                    //
-                                    // Skip updating strings with interpolation: (${...})
-                                    let content = attr_child.text().to_string();
+                            if found_attr && extract_string_value(&attr_child) == old_value {
+                                //
+                                // Skip updating strings with interpolation: (${...})
+                                let content = attr_child.text().to_string();
 
-                                    if content.contains("${") && content.contains('}') {
-                                        return Ok(());
-                                    }
-
-                                    string_node = Some(attr_child);
-                                    break;
+                                if content.contains("${") && content.contains('}') {
+                                    return Ok(());
                                 }
+
+                                string_node = Some(attr_child);
+                                break;
                             }
                         }
                         _ => {}
@@ -381,35 +371,34 @@ impl Ast {
     }
 
     /// Update vendor hash by building the package and extracting the hash from error output
-    /// Returns (old_hash, new_hash) if successful
-    pub fn update_vendor(&mut self, package_name: &str, package_path: &std::path::Path, hash_type: &str, pb: Option<&ProgressBar>) -> Result<Option<(String, String)>> {
+    pub fn update_vendor(&mut self, package: &Package, hash_type: &str, pb: Option<&ProgressBar>) -> Result<()> {
         if let Some(pb) = pb {
-            pb.set_message(format!("{package_name}: Building to get new {hash_type}Hash..."));
+            pb.set_message(format!("{}: Building to get new {hash_type}Hash...", package.display_name()));
         } else {
-            println!("{}", format!("{package_name}: Building to get new {hash_type}Hash...").yellow());
+            println!("{}", format!("{}: Building to get new {hash_type}Hash...", package.display_name()).yellow());
         }
 
         // Write out the current content so "nix build" can work with the latest changes
-        fs::write(package_path, self.content())?;
+        fs::write(&package.path, self.content())?;
 
-        let output = Command::new("nix").args(["build", &format!(".#{package_name}"), "--no-link"]).output()?;
+        let output = Command::new("nix").args(["build", &format!(".#{}", package.name), "--no-link"]).output()?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
 
-            if let Some(new_hash) = extract_hash_from_error(&stderr) {
+            if let Some(new_hash) = stderr.lines().find_map(|l| Some(l.trim().split_once("got:")?.1.trim().to_string())) {
                 let attr_name = format!("{hash_type}Hash");
 
                 if let Some(old_hash) = self.get(&attr_name) {
                     self.set(&attr_name, &old_hash, &new_hash)?;
-                    return Ok(Some((old_hash, new_hash)));
+                    return Ok(());
                 }
+
                 // Handle case where hash is empty or doesn't exist
                 self.set(&attr_name, "", &new_hash)?;
-                return Ok(Some((String::new(), new_hash)));
             }
         }
 
-        Ok(None)
+        Ok(())
     }
 }

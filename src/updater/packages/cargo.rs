@@ -46,7 +46,7 @@ impl NixPackageUpdater {
         }
 
         // Update cargoHash
-        ast.update_vendor(&package.display_name(), &package.path, "cargo", pb)?;
+        ast.update_vendor(package, "cargo", pb)?;
 
         Self::write(&ast, package)?;
 
