@@ -1,6 +1,8 @@
 mod finder;
+mod packages;
 mod platform;
-mod update;
+
+use packages::common::short_hash;
 
 use anyhow::Result;
 use colored::Colorize;
@@ -31,7 +33,7 @@ pub struct NixPackageUpdater {
 impl NixPackageUpdater {
     #[allow(clippy::fn_params_excessive_bools)]
     pub fn new(packages: String, update: bool, force: bool, cache: bool, verbose: bool) -> Result<Self> {
-        let config = Config::load();
+        let config = Config::load()?;
 
         let build_results_dir = PathBuf::from("build-results");
 
@@ -103,12 +105,9 @@ impl NixPackageUpdater {
 
                 let (package_update_result, build_success) = match new_updater {
                     Ok(mut updater) => {
-                        // Update package
                         let update_outcome = updater.update_package(package, Some(&pb)).unwrap_or_else(|e| UpdateResult {
-                            success: false,
-                            old_version: None,
-                            new_version: None,
                             message: Some(format!("Update error: {e}")),
+                            ..Default::default()
                         });
 
                         // Build package
@@ -118,10 +117,8 @@ impl NixPackageUpdater {
                     }
                     Err(e) => {
                         let failed_result = UpdateResult {
-                            success: false,
-                            old_version: None,
-                            new_version: None,
                             message: Some(format!("Updater error: {e}")),
+                            ..Default::default()
                         };
 
                         (failed_result, false)
@@ -147,10 +144,26 @@ impl NixPackageUpdater {
             // Prepare details
             let mut details = Vec::new();
 
-            if let (Some(old), Some(new)) = (&update_result.old_version, &update_result.new_version)
-                && old != new {
-                    details.push(format!("{old} → {new}"));
-                }
+            // let has_version_change = update_result.has_version_change();
+            // let has_hash_change = update_result.has_hash_change();
+
+            let changes: Vec<_> = [
+                match (&update_result.old_version, &update_result.new_version) {
+                    (Some(old_v), Some(new_v)) if old_v != new_v => Some(format!("{old_v} → {new_v}")),
+                    _ => None,
+                },
+                match (&update_result.old_hash, &update_result.new_hash) {
+                    (Some(old_h), Some(new_h)) if old_h != new_h => Some(format!("{} → {}", short_hash(old_h), short_hash(new_h))),
+                    _ => None,
+                },
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+
+            if !changes.is_empty() {
+                details.push(changes.join(", "));
+            }
 
             if let Some(msg) = &update_result.message {
                 details.push(msg.clone());
@@ -198,9 +211,8 @@ impl NixPackageUpdater {
         if !self.update {
             return Ok(UpdateResult {
                 success: true,
-                old_version: None,
-                new_version: None,
                 message: Some("Skipping update".to_string()),
+                ..Default::default()
             });
         }
 

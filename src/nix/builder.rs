@@ -16,11 +16,7 @@ pub fn build_package(package: &Package, pb: Option<&ProgressBar>, build_results_
 
     let output = Command::new("nix").args(["build", &format!(".#{}", package.name), "--no-link"]).output()?;
 
-    let log_content = format!(
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let log_content = format!("stdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
 
     fs::write(&log_file, log_content)?;
 

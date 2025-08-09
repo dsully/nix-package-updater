@@ -20,11 +20,13 @@ impl std::fmt::Display for PackageKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct UpdateResult {
     pub success: bool,
     pub old_version: Option<String>,
     pub new_version: Option<String>,
+    pub old_hash: Option<String>,
+    pub new_hash: Option<String>,
     pub message: Option<String>,
 }
 
@@ -40,7 +42,7 @@ impl Package {
     /// Format the package name with hyperlink if homepage is available
     pub fn display_name(&self) -> String {
         if let Some(homepage) = &self.homepage {
-            hyperlink(homepage, &self.name)
+            format!("\x1B]8;;{homepage}\x1B\\{}\x1B]8;;\x1B\\", &self.name).cyan().to_string()
         } else {
             self.name.cyan().to_string()
         }
@@ -50,9 +52,4 @@ impl Package {
     pub fn display_width(&self) -> usize {
         self.name.len()
     }
-}
-
-/// Emit an OSC-8 hyperlink escape sequence.
-pub fn hyperlink(url: &str, text: &str) -> String {
-    format!("\x1B]8;;{url}\x1B\\{text}\x1B]8;;\x1B\\").cyan().to_string()
 }

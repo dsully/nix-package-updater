@@ -1,9 +1,4 @@
-#![allow(
-    clippy::module_name_repetitions,
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::struct_excessive_bools
-)]
+#![allow(clippy::module_name_repetitions, clippy::missing_errors_doc, clippy::missing_panics_doc, clippy::struct_excessive_bools)]
 
 mod clients;
 mod config;
@@ -11,8 +6,8 @@ mod nix;
 mod package;
 mod updater;
 
-use clap::{Command, CommandFactory, Parser, Subcommand};
-use clap_complete::{Generator, Shell, generate};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{Shell, generate};
 use colored::Colorize;
 use std::io;
 
@@ -95,27 +90,19 @@ enum Commands {
     },
 }
 
-fn print_completions<G: Generator>(generator: G, cmd: &mut Command) {
-    generate(generator, cmd, cmd.get_name().to_string(), &mut io::stdout());
-}
-
 fn main() {
     let cli = Cli::parse();
 
     // Handle completions subcommand
     if let Some(Commands::Completions { shell }) = cli.command {
         let mut cmd = Cli::command();
+        let name = &cmd.get_name().to_string();
 
         eprintln!("Generating completion file for {shell}...");
 
-        print_completions(shell, &mut cmd);
+        generate(shell, &mut cmd, name, &mut io::stdout());
 
         return;
-    }
-
-    // Run the main updater logic
-    if cli.verbose {
-        eprintln!("{}", "Verbose mode enabled".dimmed());
     }
 
     let mut updater = match NixPackageUpdater::new(cli.packages, !cli.no_update, cli.force, cli.cache, cli.verbose) {

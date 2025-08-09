@@ -1,6 +1,8 @@
 use anyhow::Result;
 use octocrab::Octocrab;
 
+const DEFAULT_BRANCHES: [&str; 2] = ["main", "master"];
+
 // GitHub client using octocrab
 pub struct GitHubClient {
     client: Octocrab,
@@ -14,7 +16,7 @@ impl GitHubClient {
         let client = runtime.block_on(async {
             let mut builder = Octocrab::builder();
 
-            // Check for GitHub token in environment
+            // Avoid GitHub rate limits.
             if let Ok(token) = std::env::var("GITHUB_TOKEN") {
                 builder = builder.personal_token(token);
             }
@@ -71,7 +73,7 @@ impl GitHubClient {
                 }
             } else {
                 // Fallback: try common branch names
-                for branch in &["main", "master"] {
+                for branch in &DEFAULT_BRANCHES {
                     let Ok(git_ref) = self
                         .client
                         .repos(owner, repo)

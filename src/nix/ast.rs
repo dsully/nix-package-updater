@@ -1,4 +1,3 @@
-use anyhow::Result;
 use rnix::{SyntaxKind, SyntaxNode};
 use std::collections::HashMap;
 use std::fs;
@@ -24,9 +23,10 @@ pub fn find_attr_value(node: &SyntaxNode, attr_name: &str) -> Option<String> {
                         match kv_child.kind() {
                             SyntaxKind::NODE_ATTRPATH => {
                                 if let Some(ident) = kv_child.first_child()
-                                    && ident.text() == attr_name {
-                                        key = Some(attr_name);
-                                    }
+                                    && ident.text() == attr_name
+                                {
+                                    key = Some(attr_name);
+                                }
                             }
                             SyntaxKind::NODE_STRING => {
                                 value = Some(extract_string_value(&kv_child));
@@ -68,27 +68,28 @@ pub fn contains_function_call(node: &SyntaxNode, function_name: &str) -> bool {
     for child in node.descendants() {
         if child.kind() == SyntaxKind::NODE_APPLY
             && let Some(func) = child.first_child()
-                && func.text().to_string().contains(function_name) {
-                    return true;
-                }
+            && func.text().to_string().contains(function_name)
+        {
+            return true;
+        }
     }
 
     false
 }
 
 /// Extract field from a Nix file using AST
-pub fn extract_field_from_ast(path: &Path, field_name: &str) -> Result<Option<String>> {
-    let content = fs::read_to_string(path)?;
+pub fn extract_field_from_ast(path: &Path, field_name: &str) -> Option<String> {
+    let content = fs::read_to_string(path).expect("Failed to read Nix file");
 
     let ast = rnix::Root::parse(&content);
 
     // First try to find as an attribute
     if let Some(value) = find_attr_value(&ast.syntax(), field_name) {
-        return Ok(Some(value));
+        return Some(value);
     }
 
     // If not found, try to find as a let binding or inherit
-    Ok(find_let_binding_or_inherit(&ast.syntax(), field_name))
+    find_let_binding_or_inherit(&ast.syntax(), field_name)
 }
 
 /// Find a value from let binding or inherit statement
@@ -99,14 +100,15 @@ pub fn find_let_binding_or_inherit(node: &SyntaxNode, binding_name: &str) -> Opt
             for let_child in child.children() {
                 if let_child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
                     && let Some(ident) = let_child.first_child()
-                        && ident.text() == binding_name {
-                            // Get the value after the = sign
-                            for value_child in let_child.children() {
-                                if value_child.kind() == SyntaxKind::NODE_STRING {
-                                    return Some(extract_string_value(&value_child));
-                                }
-                            }
+                    && ident.text() == binding_name
+                {
+                    // Get the value after the = sign
+                    for value_child in let_child.children() {
+                        if value_child.kind() == SyntaxKind::NODE_STRING {
+                            return Some(extract_string_value(&value_child));
                         }
+                    }
+                }
             }
         }
 
@@ -130,31 +132,33 @@ pub fn find_attr_in_fetch_from_github(node: &SyntaxNode, attr_name: &str) -> Opt
     for child in node.descendants() {
         if child.kind() == SyntaxKind::NODE_APPLY
             && let Some(func) = child.first_child()
-                && func.text().to_string().contains("fetchFromGitHub") {
-                    // Look for the attribute set argument
-                    for apply_child in child.children() {
-                        if apply_child.kind() == SyntaxKind::NODE_ATTR_SET
-                            && let Some(value) = find_attr_value(&apply_child, attr_name) {
-                                // If the value is "pname", resolve it from the parent scope
-                                if value == "pname" && attr_name == "repo" {
-                                    // Look for pname in the parent scope
-                                    if let Some(pname) = find_attr_value(node, "pname") {
-                                        return Some(pname);
-                                    }
-                                }
-
-                                return Some(value);
-                            }
+            && func.text().to_string().contains("fetchFromGitHub")
+        {
+            // Look for the attribute set argument
+            for apply_child in child.children() {
+                if apply_child.kind() == SyntaxKind::NODE_ATTR_SET
+                    && let Some(value) = find_attr_value(&apply_child, attr_name)
+                {
+                    // If the value is "pname", resolve it from the parent scope
+                    if value == "pname" && attr_name == "repo" {
+                        // Look for pname in the parent scope
+                        if let Some(pname) = find_attr_value(node, "pname") {
+                            return Some(pname);
+                        }
                     }
+
+                    return Some(value);
                 }
+            }
+        }
     }
 
     None
 }
 
 /// Extract owner/repo from fetchFromGitHub in a Nix file
-pub fn extract_github_info(path: &Path) -> Result<(Option<String>, Option<String>)> {
-    let content = fs::read_to_string(path)?;
+pub fn extract_github_info(path: &Path) -> (Option<String>, Option<String>) {
+    let content = fs::read_to_string(path).expect("Couldn't read Nix file");
 
     let ast = rnix::Root::parse(&content);
     let root = ast.syntax();
@@ -162,7 +166,7 @@ pub fn extract_github_info(path: &Path) -> Result<(Option<String>, Option<String
     let owner = find_attr_in_fetch_from_github(&root, "owner");
     let repo = find_attr_in_fetch_from_github(&root, "repo");
 
-    Ok((owner, repo))
+    (owner, repo)
 }
 
 /// Find platform blocks in content
@@ -178,15 +182,16 @@ pub fn find_platform_blocks(content: &str) -> Vec<(String, String)> {
             // Look for pattern like: platform-name = { ... }
             if let Some(parent) = node.parent()
                 && parent.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
-                    && let Some(key_node) = parent.children().find(|n| n.kind() == SyntaxKind::NODE_ATTRPATH) {
-                        let platform_name = key_node.text().to_string();
+                && let Some(key_node) = parent.children().find(|n| n.kind() == SyntaxKind::NODE_ATTRPATH)
+            {
+                let platform_name = key_node.text().to_string();
 
-                        if platform_name.contains('-') {
-                            let block_text = parent.text().to_string();
+                if platform_name.contains('-') {
+                    let block_text = parent.text().to_string();
 
-                            platforms.push((platform_name, block_text));
-                        }
-                    }
+                    platforms.push((platform_name, block_text));
+                }
+            }
         }
     }
 
@@ -207,61 +212,64 @@ pub fn find_platform_data_blocks(node: &SyntaxNode) -> Vec<PlatformBlock> {
 
     for child in node.descendants() {
         if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
-            && let Some(attr_path) = child.first_child() {
-                let attr_name = attr_path.text().to_string();
+            && let Some(attr_path) = child.first_child()
+        {
+            let attr_name = attr_path.text().to_string();
 
-                if attr_name == "platformData" || attr_name == "dists" {
-                    // Found platform data, now look for the immediate attr set
-                    for value_node in child.children() {
-                        if value_node.kind() == SyntaxKind::NODE_ATTR_SET {
-                            // This is the platformData/dists attr set
-                            // Look for individual platform entries (direct children only)
-                            for platform_entry in value_node.children() {
-                                if platform_entry.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
-                                    && let Some(platform_name_node) = platform_entry.first_child() {
-                                        let platform_name = platform_name_node.text().to_string();
+            if attr_name == "platformData" || attr_name == "dists" {
+                // Found platform data, now look for the immediate attr set
+                for value_node in child.children() {
+                    if value_node.kind() == SyntaxKind::NODE_ATTR_SET {
+                        // This is the platformData/dists attr set
+                        // Look for individual platform entries (direct children only)
+                        for platform_entry in value_node.children() {
+                            if platform_entry.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                                && let Some(platform_name_node) = platform_entry.first_child()
+                            {
+                                let platform_name = platform_name_node.text().to_string();
 
-                                        // Extract attributes from this platform's attr set
-                                        let mut platform_attrs = HashMap::new();
+                                // Extract attributes from this platform's attr set
+                                let mut platform_attrs = HashMap::new();
 
-                                        // Look for the attr set that contains the platform attributes
-                                        for platform_value in platform_entry.children() {
-                                            if platform_value.kind() == SyntaxKind::NODE_ATTR_SET {
-                                                // Find filename, hash, platform attributes
-                                                for attr in platform_value.children() {
-                                                    if attr.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
-                                                        && let Some(attr_name_node) = attr.first_child() {
-                                                            let attr_name = attr_name_node.text().to_string();
+                                // Look for the attr set that contains the platform attributes
+                                for platform_value in platform_entry.children() {
+                                    if platform_value.kind() == SyntaxKind::NODE_ATTR_SET {
+                                        // Find filename, hash, platform attributes
+                                        for attr in platform_value.children() {
+                                            if attr.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                                                && let Some(attr_name_node) = attr.first_child()
+                                            {
+                                                let attr_name = attr_name_node.text().to_string();
 
-                                                            // Get the value of this attribute
-                                                            for attr_value in attr.children() {
-                                                                if attr_value.kind() == SyntaxKind::NODE_STRING {
-                                                                    let value = extract_string_value(&attr_value);
+                                                // Get the value of this attribute
+                                                for attr_value in attr.children() {
+                                                    if attr_value.kind() == SyntaxKind::NODE_STRING {
+                                                        let value = extract_string_value(&attr_value);
 
-                                                                    platform_attrs.insert(attr_name.clone(), value);
+                                                        platform_attrs.insert(attr_name.clone(), value);
 
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
+                                                        break;
+                                                    }
                                                 }
                                             }
                                         }
-
-                                        if !platform_attrs.is_empty() {
-                                            blocks.push(PlatformBlock {
-                                                platform_name: platform_name.trim_matches('"').to_string(),
-                                                attributes: platform_attrs,
-                                            });
-                                        }
                                     }
-                            }
+                                }
 
-                            break; // Don't look deeper
+                                if !platform_attrs.is_empty() {
+                                    blocks.push(PlatformBlock {
+                                        platform_name: platform_name.trim_matches('"').to_string(),
+                                        attributes: platform_attrs,
+                                    });
+                                }
+                            }
                         }
+
+                        break; // Don't look deeper
                     }
                 }
             }
+        }
     }
 
     blocks

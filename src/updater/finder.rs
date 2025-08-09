@@ -12,11 +12,7 @@ impl super::NixPackageUpdater {
         let mut found_files = HashSet::new();
 
         // Parse package filter
-        let package_filter: Option<Vec<&str>> = if self.packages == "all" {
-            None
-        } else {
-            Some(self.packages.split(',').collect())
-        };
+        let package_filter: Option<Vec<&str>> = if self.packages == "all" { None } else { Some(self.packages.split(',').collect()) };
 
         // Walk through all .nix files in the packages directory
         for entry in WalkDir::new("packages/")
@@ -43,9 +39,10 @@ impl super::NixPackageUpdater {
                 if let Some(pname) = find_attr_value(&root, "pname") {
                     // Apply package filter if specified
                     if let Some(ref filter) = package_filter
-                        && !filter.iter().any(|&pkg| pname.contains(pkg)) {
-                            continue;
-                        }
+                        && !filter.iter().any(|&pkg| pname.contains(pkg))
+                    {
+                        continue;
+                    }
 
                     // Skip excluded packages
                     if self.config.is_excluded(&pname) {

@@ -3,57 +3,55 @@ use serde::Deserialize;
 use std::process::Command;
 
 #[derive(Debug, Deserialize)]
-
-pub struct NixPrefetchResult {
+struct NixPrefetchResult {
     pub hash: String,
 }
 
 #[derive(Debug, Deserialize)]
-
-pub struct NurlResult {
+struct NurlResult {
     pub args: NurlArgs,
 }
 
 #[derive(Debug, Deserialize)]
-
-pub struct NurlArgs {
+struct NurlArgs {
     pub hash: String,
     pub rev: Option<String>,
 }
 
-pub fn get_nix_hash(url: &str) -> Result<Option<String>> {
-    let output = Command::new("nix").args(["store", "prefetch-file", url, "--json"]).output()?;
+#[derive(Debug, Default)]
+pub struct Nix;
 
-    if output.status.success() {
-        let result: NixPrefetchResult = serde_json::from_slice(&output.stdout)?;
+impl Nix {
+    pub fn prefetch_hash(url: &str) -> Result<Option<String>> {
+        let output = Command::new("nix").args(["store", "prefetch-file", url, "--json"]).output()?;
 
-        Ok(Some(result.hash))
-    } else {
-        Ok(None)
-    }
-}
-
-pub fn get_nurl_data(url: &str, rev: Option<&str>) -> Result<Option<NurlResult>> {
-    let mut cmd = Command::new("nurl");
-
-    cmd.args(["--json", url]);
-
-    if let Some(r) = rev {
-        cmd.arg(r);
-    }
-
-    let output = cmd.output()?;
-
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        // nurl outputs the JSON on the last line
-        if let Some(last_line) = stdout.lines().last() {
-            Ok(Some(serde_json::from_str(last_line)?))
+        if output.status.success() {
+            Ok(Some(serde_json::from_slice::<NixPrefetchResult>(&output.stdout)?.hash))
         } else {
             Ok(None)
         }
-    } else {
-        Ok(None)
+    }
+
+    pub fn nurl_hash_and_rev(url: &str, rev: Option<&str>) -> Result<Option<(String, Option<String>)>> {
+        let mut cmd = Command::new("nurl");
+        cmd.arg("--json").arg(url);
+
+        if let Some(r) = rev {
+            cmd.arg(r);
+        }
+
+        let output = cmd.output()?;
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+
+        match String::from_utf8_lossy(&output.stdout).trim_end().lines().last() {
+            Some(last_line) if !last_line.is_empty() => {
+                let result: NurlResult = serde_json::from_str(last_line)?;
+                Ok(Some((result.args.hash, result.args.rev)))
+            }
+            _ => Ok(None),
+        }
     }
 }

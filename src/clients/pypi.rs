@@ -28,13 +28,13 @@ impl PyPiClient {
         Self {
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
-                .user_agent("nix-updater/1.0")
+                .user_agent(format!("nix-updater/{}", env!("CARGO_PKG_VERSION")))
                 .build()
-                .unwrap(),
+                .expect("Couldn't build a client for PyPi"),
         }
     }
 
-    pub fn get_project(&self, name: &str) -> Result<Option<PyPiProjectResponse>> {
+    pub fn project(&self, name: &str) -> Result<Option<PyPiProjectResponse>> {
         let url = format!("https://pypi.org/pypi/{name}/json");
 
         match self.client.get(&url).send() {

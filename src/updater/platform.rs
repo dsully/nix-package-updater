@@ -2,23 +2,8 @@ use anyhow::Result;
 use colored::Colorize;
 
 use crate::clients::PyPiReleaseFile;
-use crate::clients::nix::get_nix_hash;
+use crate::clients::nix::Nix;
 use crate::nix::{find_attr_value, find_platform_blocks, find_platform_data_blocks, update_attr_value};
-
-/// Extract GitHub repo from URL
-pub fn extract_github_repo(url: &str) -> Option<String> {
-    if let Some(pos) = url.find("github.com/") {
-        let after_domain = &url[pos + 11..];
-
-        let parts: Vec<&str> = after_domain.split('/').collect();
-
-        if parts.len() >= 2 {
-            return Some(format!("{}/{}", parts[0], parts[1]));
-        }
-    }
-
-    None
-}
 
 pub fn update_platform_hashes(content: &str, releases: &[PyPiReleaseFile], _source_type: &str) -> Result<String> {
     let mut new_content = content.to_string();
@@ -47,7 +32,6 @@ pub fn update_platform_hashes(content: &str, releases: &[PyPiReleaseFile], _sour
             let old_hash = find_attr_value(&root, "hash");
 
             if let (Some(platform_value), Some(old_hash_value)) = (platform_attr, old_hash) {
-                // Find matching release
                 let mut url = None;
 
                 for wheel in releases {
@@ -59,8 +43,7 @@ pub fn update_platform_hashes(content: &str, releases: &[PyPiReleaseFile], _sour
                 }
 
                 if let Some(url) = url {
-                    // Get new hash
-                    if let Some(new_hash) = get_nix_hash(&url)? {
+                    if let Some(new_hash) = Nix::prefetch_hash(&url)? {
                         // Update hash in platform block
                         let new_platform_block = update_attr_value(&platform_block, "hash", &old_hash_value, &new_hash);
 
@@ -79,31 +62,31 @@ pub fn update_platform_hashes(content: &str, releases: &[PyPiReleaseFile], _sour
 
     for block in platform_blocks {
         if let Some(platform_value) = block.attributes.get("platform")
-            && let Some(old_hash) = block.attributes.get("hash") {
-                // Find matching release
-                let mut url = None;
+            && let Some(old_hash) = block.attributes.get("hash")
+        {
+            // Find matching release
+            let mut url = None;
 
-                for wheel in releases {
-                    if wheel.filename.contains(platform_value) {
-                        url = Some(wheel.url.clone());
+            for wheel in releases {
+                if wheel.filename.contains(platform_value) {
+                    url = Some(wheel.url.clone());
 
-                        break;
-                    }
-                }
-
-                if let Some(url) = url {
-                    println!("Updating hash for platform {}", block.platform_name);
-
-                    // Get new hash
-                    if let Some(new_hash) = get_nix_hash(&url)? {
-                        new_content = update_attr_value(&new_content, "hash", old_hash, &new_hash);
-                    } else {
-                        eprintln!("{}", format!("Failed to get hash for platform {}", block.platform_name).red());
-                    }
-                } else {
-                    eprintln!("{}", format!("No wheel found for platform {platform_value}").yellow());
+                    break;
                 }
             }
+
+            if let Some(url) = url {
+                println!("Updating hash for platform {}", block.platform_name);
+
+                if let Some(new_hash) = Nix::prefetch_hash(&url)? {
+                    new_content = update_attr_value(&new_content, "hash", old_hash, &new_hash);
+                } else {
+                    eprintln!("{}", format!("Failed to get hash for platform {}", block.platform_name).red());
+                }
+            } else {
+                eprintln!("{}", format!("No wheel found for platform {platform_value}").yellow());
+            }
+        }
     }
 
     Ok(new_content)
@@ -138,13 +121,9 @@ pub fn update_platform_hashes_github(content: &str, release_data: &serde_json::V
                     filename
                 );
 
-                // Get new hash
-                if let Some(new_hash) = get_nix_hash(&url)? {
-                    // Update hash in platform block
+                if let Some(new_hash) = Nix::prefetch_hash(&url)? {
                     if let Some(old_hash) = find_attr_value(&root, "hash") {
-                        let new_platform_block = update_attr_value(&platform_block, "hash", &old_hash, &new_hash);
-
-                        new_content = new_content.replace(&platform_block, &new_platform_block);
+                        new_content = new_content.replace(&platform_block, &update_attr_value(&platform_block, "hash", &old_hash, &new_hash));
                     }
                 } else {
                     eprintln!("{}", format!("Failed to get hash for {platform_name}").red());
@@ -158,21 +137,22 @@ pub fn update_platform_hashes_github(content: &str, release_data: &serde_json::V
     // Handle structured platform data
     for block in platform_blocks {
         if let Some(filename) = block.attributes.get("filename")
-            && let Some(old_hash) = block.attributes.get("hash") {
-                let url = format!(
-                    "https://github.com/{}/releases/download/{}/{}",
-                    release_data["repo"].as_str().unwrap(),
-                    release_data["tag"].as_str().unwrap(),
-                    filename
-                );
+            && let Some(old_hash) = block.attributes.get("hash")
+        {
+            let url = format!(
+                "https://github.com/{}/releases/download/{}/{}",
+                release_data["repo"].as_str().unwrap(),
+                release_data["tag"].as_str().unwrap(),
+                filename
+            );
 
-                // Get new hash
-                if let Some(new_hash) = get_nix_hash(&url)? {
-                    new_content = update_attr_value(&new_content, "hash", old_hash, &new_hash);
-                } else {
-                    eprintln!("{}", format!("Failed to get hash for {filename}").red());
-                }
+            // Get new hash
+            if let Some(new_hash) = Nix::prefetch_hash(&url)? {
+                new_content = update_attr_value(&new_content, "hash", old_hash, &new_hash);
+            } else {
+                eprintln!("{}", format!("Failed to get hash for {filename}").red());
             }
+        }
     }
 
     Ok(new_content)
