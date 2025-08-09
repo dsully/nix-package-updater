@@ -1,6 +1,6 @@
 [package]
 name = "nix-package-updater"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2024"
 homepage = "https://github.com/dsully/nix-package-updater"
 repository = "https://github.com/dsully/nix-package-updater"

@@ -1,8 +1,4 @@
-mod finder;
 mod packages;
-mod platform;
-
-use packages::common::short_hash;
 
 use anyhow::Result;
 use colored::Colorize;
@@ -10,45 +6,30 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use crate::Config;
 use crate::clients::{GitHubClient, PyPiClient};
-use crate::config::Config;
-use crate::nix;
+use crate::nix::ast::Ast;
+use crate::nix::builder::build_package;
 use crate::package::{Package, UpdateResult};
 
 pub struct NixPackageUpdater {
-    pub packages: String,
-    pub update: bool,
-    pub force: bool,
-    pub cache: bool,
-    pub verbose: bool,
     pub config: Config,
-    pub build_results_dir: PathBuf,
-    pub failed_packages: Vec<String>,
+    pub build_path: PathBuf,
     pub pypi_client: PyPiClient,
     pub github_client: GitHubClient,
 }
 
 impl NixPackageUpdater {
-    #[allow(clippy::fn_params_excessive_bools)]
-    pub fn new(packages: String, update: bool, force: bool, cache: bool, verbose: bool) -> Result<Self> {
-        let config = Config::load()?;
+    pub fn new(config: Config) -> Result<Self> {
+        let path = PathBuf::from("build-results");
 
-        let build_results_dir = PathBuf::from("build-results");
-
-        // Create build results directory
-        fs::create_dir_all(&build_results_dir)?;
+        fs::create_dir_all(&path)?;
 
         Ok(Self {
-            packages,
-            update,
-            force,
-            cache,
-            verbose,
             config,
-            build_results_dir,
-            failed_packages: Vec::new(),
+            build_path: path,
             pypi_client: PyPiClient::new(),
             github_client: GitHubClient::new()?,
         })
@@ -56,17 +37,59 @@ impl NixPackageUpdater {
 
     #[allow(clippy::too_many_lines)]
     pub fn run(&mut self) {
-        let mut packages = self.find_packages();
+        let mut packages = Package::discover(&self.config.packages, &self.config.exclude);
 
         if packages.is_empty() {
             println!("{}", "No packages found to process".yellow());
-
             return;
         }
 
         // Sort packages by name
         packages.sort_by(|a, b| a.name.cmp(&b.name));
 
+        // Create shared resources for parallel processing
+        let multi_progress = MultiProgress::new();
+
+        let config = Arc::new(self.config.clone());
+        let mut cleanup = true;
+
+        // Process packages in parallel
+        let results: Vec<_> = packages
+            .par_iter()
+            .map(|package| {
+                let config_clone = Arc::clone(&config);
+
+                let pb = multi_progress.add(ProgressBar::new_spinner());
+
+                pb.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
+
+                pb.set_message(format!("Processing {}...", package.display_name()));
+
+                // Create a new updater instance for this thread
+                let new_updater = NixPackageUpdater::new(self.config.clone());
+
+                let update = match new_updater {
+                    Ok(mut updater) => {
+                        let mut update = updater
+                            .update_package(package, Some(&pb))
+                            .unwrap_or_else(|e| UpdateResult::failed(format!("Updater error: {e}")));
+
+                        if update.updated {
+                            update.built = build_package(package, Some(&pb), &self.build_path, self.config.cache, &config_clone).unwrap_or(false);
+                        }
+
+                        update
+                    }
+                    Err(e) => UpdateResult::failed(format!("Updater error: {e}")),
+                };
+
+                pb.finish_and_clear();
+
+                (package, update)
+            })
+            .collect();
+
+        //
         println!("\n{}", "Package Update Results".bold());
 
         println!("{}", "-".repeat(80));
@@ -81,78 +104,23 @@ impl NixPackageUpdater {
 
         println!("{}", "-".repeat(80));
 
-        // Create shared resources for parallel processing
-        let multi_progress = MultiProgress::new();
-
-        let failed_packages = Arc::new(Mutex::new(Vec::new()));
-
-        let config = Arc::new(self.config.clone());
-
-        let build_results_dir = Arc::new(self.build_results_dir.clone());
-
-        // Process packages in parallel
-        let results: Vec<_> = packages
-            .par_iter()
-            .map(|package| {
-                let pb = multi_progress.add(ProgressBar::new_spinner());
-
-                pb.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
-
-                pb.set_message(format!("Processing {}...", package.display_name()));
-
-                // Create a new updater instance for this thread
-                let new_updater = NixPackageUpdater::new(self.packages.clone(), self.update, self.force, self.cache, self.verbose);
-
-                let (package_update_result, build_success) = match new_updater {
-                    Ok(mut updater) => {
-                        let update_outcome = updater.update_package(package, Some(&pb)).unwrap_or_else(|e| UpdateResult {
-                            message: Some(format!("Update error: {e}")),
-                            ..Default::default()
-                        });
-
-                        // Build package
-                        let build_success = nix::build_package(package, Some(&pb), &build_results_dir, self.cache, &config).unwrap_or(false);
-
-                        (update_outcome, build_success)
-                    }
-                    Err(e) => {
-                        let failed_result = UpdateResult {
-                            message: Some(format!("Updater error: {e}")),
-                            ..Default::default()
-                        };
-
-                        (failed_result, false)
-                    }
-                };
-
-                if !build_success {
-                    failed_packages.lock().unwrap().push(package.name.clone());
-                }
-
-                pb.finish_and_clear();
-
-                (package, package_update_result, build_success)
-            })
-            .collect();
-
         // Display results in sorted order
-        for (package, update_result, build_success) in results {
-            let update_status = if update_result.success { "✓" } else { "✗" };
+        for (package, result) in results {
+            let update_status = if result.updated { "✓" } else { "✗" };
+            let build_status = if result.built { "✓" } else { "✗" };
 
-            let build_status = if build_success { "✓" } else { "✗" };
+            if !result.built {
+                cleanup = false;
+            }
 
-            // Prepare details
             let mut details = Vec::new();
 
-            // let has_version_change = update_result.has_version_change();
-            // let has_hash_change = update_result.has_hash_change();
-
             let changes: Vec<_> = [
-                match (&update_result.old_version, &update_result.new_version) {
+                match (&result.old_version, &result.new_version) {
                     (Some(old_v), Some(new_v)) if old_v != new_v => Some(format!("{old_v} → {new_v}")),
                     _ => None,
                 },
-                match (&update_result.old_hash, &update_result.new_hash) {
+                match (&result.old_git_commit, &result.new_git_commit) {
                     (Some(old_h), Some(new_h)) if old_h != new_h => Some(format!("{} → {}", short_hash(old_h), short_hash(new_h))),
                     _ => None,
                 },
@@ -165,7 +133,7 @@ impl NixPackageUpdater {
                 details.push(changes.join(", "));
             }
 
-            if let Some(msg) = &update_result.message {
+            if let Some(msg) = &result.message {
                 details.push(msg.clone());
             }
 
@@ -192,28 +160,16 @@ impl NixPackageUpdater {
 
         println!("{}", "-".repeat(80));
 
-        // Update failed packages list
-        self.failed_packages.clone_from(&failed_packages.lock().unwrap());
-
-        // Clean up if no failures
-        if self.failed_packages.is_empty() {
-            let _ = fs::remove_dir_all(&self.build_results_dir);
-        } else {
-            println!("\n{}", format!("Failed packages: {}", self.failed_packages.join(", ")).red());
-
-            println!("{}", format!("Build logs available in {}/", self.build_results_dir.display()).yellow());
+        if cleanup {
+            let _ = fs::remove_dir_all(&self.build_path);
         }
     }
 
     fn update_package(&mut self, package: &Package, pb: Option<&ProgressBar>) -> Result<UpdateResult> {
         use crate::package::PackageKind;
 
-        if !self.update {
-            return Ok(UpdateResult {
-                success: true,
-                message: Some("Skipping update".to_string()),
-                ..Default::default()
-            });
+        if self.config.no_update {
+            return Ok(UpdateResult::message("Skipping update"));
         }
 
         match package.kind {
@@ -223,4 +179,24 @@ impl NixPackageUpdater {
             PackageKind::Git => self.update_git_package(package, pb),
         }
     }
+
+    /// Common helper to check if update should be skipped
+    fn should_skip_update(&self, current: &str, latest: &str) -> bool {
+        current == latest && !self.config.force
+    }
+
+    /// Common helper to create an Ast from a package
+    fn ast(package: &Package) -> Ast {
+        Ast::from_ast(package.ast.clone())
+    }
+
+    /// Common helper to finalize an Ast by writing to file
+    fn write(ast: &Ast, package: &Package) -> Result<()> {
+        Ok(std::fs::write(&package.path, ast.content())?)
+    }
+}
+
+/// Create a short git hash (first 8 characters) from a full hash or revision
+pub fn short_hash(hash: &str) -> String {
+    hash.strip_prefix("sha256-").unwrap_or(hash).chars().take(8).collect()
 }

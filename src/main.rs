@@ -1,19 +1,25 @@
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc, clippy::missing_panics_doc, clippy::struct_excessive_bools)]
 
 mod clients;
-mod config;
 mod nix;
 mod package;
 mod updater;
 
-use clap::{CommandFactory, Parser, Subcommand};
+use std::io;
+use std::str::FromStr;
+
+use anyhow::Result;
+use clap::{CommandFactory, Parser};
 use clap_complete::{Shell, generate};
 use colored::Colorize;
-use std::io;
+use etcetera::base_strategy::{BaseStrategy, choose_base_strategy};
+use figment::Figment;
+use figment::providers::{Env, Format, Serialized, Toml};
+use serde::{Deserialize, Serialize};
 
 use crate::updater::NixPackageUpdater;
 
-#[derive(Parser)]
+#[derive(Parser, Clone, Debug, Serialize, Deserialize)]
 #[command(
     name = "nix-updater",
     version,
@@ -50,13 +56,14 @@ Examples:
     # Generate shell completions
     ./update completions bash"#
 )]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
+struct Config {
+    packages: Vec<String>,
 
-    /// Comma-separated list of packages or 'all'
-    #[arg(short, long, default_value = "all", global = true)]
-    packages: String,
+    #[arg(long, global = true)]
+    cachix_name: Option<String>,
+
+    #[arg(long, global = true)]
+    exclude: Vec<String>,
 
     /// Skip updating packages, only build
     #[arg(long, global = true)]
@@ -77,35 +84,35 @@ struct Cli {
     /// Dry run - show what would be updated without making changes
     #[arg(long, global = true)]
     dry_run: bool,
-}
 
-#[derive(Subcommand)]
-
-enum Commands {
     /// Generate shell completions
-    Completions {
-        /// The shell to generate completions for
-        #[arg(value_enum)]
-        shell: Shell,
-    },
+    #[arg(long, global = true)]
+    completions: Option<String>,
 }
 
-fn main() {
-    let cli = Cli::parse();
+fn main() -> Result<()> {
+    let strategy = choose_base_strategy().expect("Unable to find base strategy");
+    let path = strategy.config_dir().join("nix-updater").join("config.toml");
+
+    let config: Config = Figment::new()
+        .merge(Serialized::defaults(Config::parse()))
+        .merge(Toml::file(path))
+        .merge(Env::prefixed("NIX_UPDATER_").split("_"))
+        .extract()?;
 
     // Handle completions subcommand
-    if let Some(Commands::Completions { shell }) = cli.command {
-        let mut cmd = Cli::command();
+    if let Some(shell) = config.completions {
+        let mut cmd = Config::command();
         let name = &cmd.get_name().to_string();
 
         eprintln!("Generating completion file for {shell}...");
 
-        generate(shell, &mut cmd, name, &mut io::stdout());
+        generate(Shell::from_str(&shell).expect("Invalid shell!"), &mut cmd, name, &mut io::stdout());
 
-        return;
+        return Ok(());
     }
 
-    let mut updater = match NixPackageUpdater::new(cli.packages, !cli.no_update, cli.force, cli.cache, cli.verbose) {
+    let mut updater = match NixPackageUpdater::new(config) {
         Ok(updater) => updater,
         Err(e) => {
             eprintln!("\n{}", format!("Error initializing updater: {e}").red());
@@ -115,4 +122,6 @@ fn main() {
     };
 
     updater.run();
+
+    Ok(())
 }

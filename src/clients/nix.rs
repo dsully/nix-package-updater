@@ -1,6 +1,7 @@
+use std::process::Command;
+
 use anyhow::Result;
 use serde::Deserialize;
-use std::process::Command;
 
 #[derive(Debug, Deserialize)]
 struct NixPrefetchResult {
@@ -32,7 +33,7 @@ impl Nix {
         }
     }
 
-    pub fn nurl_hash_and_rev(url: &str, rev: Option<&str>) -> Result<Option<(String, Option<String>)>> {
+    pub fn hash_and_rev(url: &str, rev: Option<&str>) -> Result<Option<(String, Option<String>)>> {
         let mut cmd = Command::new("nurl");
         cmd.arg("--json").arg(url);
 

@@ -1,7 +1,15 @@
-use rnix::{SyntaxKind, SyntaxNode};
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::process::Command;
+
+use anyhow::Result;
+use colored::Colorize;
+use indicatif::ProgressBar;
+use rnix::{Parse, Root, SyntaxKind, SyntaxNode};
+
+use crate::clients::PyPiReleaseFile;
+use crate::clients::nix::Nix;
+use crate::nix::builder::extract_hash_from_error;
 
 #[derive(Debug)]
 pub struct PlatformBlock {
@@ -9,50 +17,8 @@ pub struct PlatformBlock {
     pub attributes: std::collections::HashMap<String, String>,
 }
 
-/// Helper to find attribute values in Nix AST
-pub fn find_attr_value(node: &SyntaxNode, attr_name: &str) -> Option<String> {
-    for child in node.descendants() {
-        if child.kind() == SyntaxKind::NODE_ATTR_SET {
-            for attr_child in child.children() {
-                if attr_child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
-                    let mut key = None;
-
-                    let mut value = None;
-
-                    for kv_child in attr_child.children() {
-                        match kv_child.kind() {
-                            SyntaxKind::NODE_ATTRPATH => {
-                                if let Some(ident) = kv_child.first_child()
-                                    && ident.text() == attr_name
-                                {
-                                    key = Some(attr_name);
-                                }
-                            }
-                            SyntaxKind::NODE_STRING => {
-                                value = Some(extract_string_value(&kv_child));
-                            }
-                            SyntaxKind::NODE_IDENT => {
-                                // Handle identifier references like `repo = pname;`
-                                // For now, just return the identifier name
-                                value = Some(kv_child.text().to_string());
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    if key.is_some() && value.is_some() {
-                        return value;
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
 /// Extract string value from a Nix string node
-pub fn extract_string_value(node: &SyntaxNode) -> String {
+fn extract_string_value(node: &SyntaxNode) -> String {
     let text = node.text().to_string();
 
     // Remove quotes
@@ -63,214 +29,387 @@ pub fn extract_string_value(node: &SyntaxNode) -> String {
     }
 }
 
-/// Check if content contains a specific function call
-pub fn contains_function_call(node: &SyntaxNode, function_name: &str) -> bool {
-    for child in node.descendants() {
-        if child.kind() == SyntaxKind::NODE_APPLY
-            && let Some(func) = child.first_child()
-            && func.text().to_string().contains(function_name)
-        {
-            return true;
-        }
+/// AST Updater that maintains the parse tree and applies updates
+pub struct Ast {
+    content: String,
+    ast: Parse<Root>,
+}
+
+impl Ast {
+    pub fn from_ast(ast: Parse<Root>) -> Self {
+        let content = ast.tree().to_string();
+        Self { content, ast }
     }
 
-    false
-}
-
-/// Extract field from a Nix file using AST
-pub fn extract_field_from_ast(path: &Path, field_name: &str) -> Option<String> {
-    let content = fs::read_to_string(path).expect("Failed to read Nix file");
-
-    let ast = rnix::Root::parse(&content);
-
-    // First try to find as an attribute
-    if let Some(value) = find_attr_value(&ast.syntax(), field_name) {
-        return Some(value);
-    }
-
-    // If not found, try to find as a let binding or inherit
-    find_let_binding_or_inherit(&ast.syntax(), field_name)
-}
-
-/// Find a value from let binding or inherit statement
-pub fn find_let_binding_or_inherit(node: &SyntaxNode, binding_name: &str) -> Option<String> {
-    for child in node.descendants() {
-        // Check for let bindings
-        if child.kind() == SyntaxKind::NODE_LET_IN {
-            for let_child in child.children() {
-                if let_child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
-                    && let Some(ident) = let_child.first_child()
-                    && ident.text() == binding_name
-                {
-                    // Get the value after the = sign
-                    for value_child in let_child.children() {
-                        if value_child.kind() == SyntaxKind::NODE_STRING {
-                            return Some(extract_string_value(&value_child));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Check for inherit statements
-        if child.kind() == SyntaxKind::NODE_INHERIT {
-            for inherit_child in child.children() {
-                if inherit_child.kind() == SyntaxKind::NODE_IDENT && inherit_child.text() == binding_name {
-                    // For inherit, we need to look for the actual value elsewhere
-                    // This is a simplified version - inherit can be complex
-                    return None;
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// Find attribute value within a fetchFromGitHub call
-pub fn find_attr_in_fetch_from_github(node: &SyntaxNode, attr_name: &str) -> Option<String> {
-    for child in node.descendants() {
-        if child.kind() == SyntaxKind::NODE_APPLY
-            && let Some(func) = child.first_child()
-            && func.text().to_string().contains("fetchFromGitHub")
-        {
-            // Look for the attribute set argument
-            for apply_child in child.children() {
-                if apply_child.kind() == SyntaxKind::NODE_ATTR_SET
-                    && let Some(value) = find_attr_value(&apply_child, attr_name)
-                {
-                    // If the value is "pname", resolve it from the parent scope
-                    if value == "pname" && attr_name == "repo" {
-                        // Look for pname in the parent scope
-                        if let Some(pname) = find_attr_value(node, "pname") {
-                            return Some(pname);
-                        }
-                    }
-
-                    return Some(value);
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// Extract owner/repo from fetchFromGitHub in a Nix file
-pub fn extract_github_info(path: &Path) -> (Option<String>, Option<String>) {
-    let content = fs::read_to_string(path).expect("Couldn't read Nix file");
-
-    let ast = rnix::Root::parse(&content);
-    let root = ast.syntax();
-
-    let owner = find_attr_in_fetch_from_github(&root, "owner");
-    let repo = find_attr_in_fetch_from_github(&root, "repo");
-
-    (owner, repo)
-}
-
-/// Find platform blocks in content
-pub fn find_platform_blocks(content: &str) -> Vec<(String, String)> {
-    let mut platforms = Vec::new();
-
-    let ast = rnix::Root::parse(content);
-
-    let root = ast.syntax();
-
-    for node in root.descendants() {
-        if node.kind() == SyntaxKind::NODE_ATTR_SET {
-            // Look for pattern like: platform-name = { ... }
-            if let Some(parent) = node.parent()
-                && parent.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
-                && let Some(key_node) = parent.children().find(|n| n.kind() == SyntaxKind::NODE_ATTRPATH)
+    /// Check if content contains a specific function call
+    pub fn contains_function_call(node: &SyntaxNode, function_name: &str) -> bool {
+        for child in node.descendants() {
+            if child.kind() == SyntaxKind::NODE_APPLY
+                && let Some(func) = child.first_child()
+                && func.text().to_string().contains(function_name)
             {
-                let platform_name = key_node.text().to_string();
+                return true;
+            }
+        }
 
-                if platform_name.contains('-') {
-                    let block_text = parent.text().to_string();
+        false
+    }
 
-                    platforms.push((platform_name, block_text));
+    /// Set an attribute value using precise AST-guided replacement
+    pub fn set(&mut self, attr_name: &str, old_value: &str, new_value: &str) -> Result<()> {
+        // Find the exact location of the attribute in the AST
+        for child in self.ast.syntax().descendants() {
+            if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
+                let mut found_attr = false;
+                let mut string_node: Option<SyntaxNode> = None;
+
+                for attr_child in child.children() {
+                    match attr_child.kind() {
+                        SyntaxKind::NODE_ATTRPATH => {
+                            if let Some(ident) = attr_child.first_child()
+                                && ident.text() == attr_name
+                            {
+                                found_attr = true;
+                            }
+                        }
+                        SyntaxKind::NODE_STRING => {
+                            if found_attr {
+                                let current_value = extract_string_value(&attr_child);
+                                if current_value == old_value {
+                                    //
+                                    // Skip updating strings with interpolation: (${...})
+                                    let content = attr_child.text().to_string();
+
+                                    if content.contains("${") && content.contains('}') {
+                                        return Ok(());
+                                    }
+
+                                    string_node = Some(attr_child);
+                                    break;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                if let Some(node) = string_node {
+                    // Get the exact text range and replace it
+                    let range = node.text_range();
+                    let start = usize::from(range.start());
+                    let end = usize::from(range.end());
+
+                    // Sigh. rnix doesn't use the rowan cursor API.
+                    let new_string = format!("\"{new_value}\"");
+                    self.content.replace_range(start..end, &new_string);
+
+                    // Re-parse to keep AST in sync
+                    self.ast = rnix::Root::parse(&self.content);
+                    return Ok(());
                 }
             }
         }
+
+        anyhow::bail!("Attribute '{}' with value '{}' not found", attr_name, old_value)
     }
 
-    platforms
-}
+    /// Get the current content
+    pub fn content(&self) -> &str {
+        &self.content
+    }
 
-/// Update attribute value in content
-pub fn update_attr_value(content: &str, attr_name: &str, old_value: &str, new_value: &str) -> String {
-    let old_pattern = format!(r#"{attr_name} = "{old_value}""#);
-    let new_pattern = format!(r#"{attr_name} = "{new_value}""#);
+    /// Get an attribute value from the AST
+    pub fn get(&self, field_name: &str) -> Option<String> {
+        // First try to find as an attribute
+        if let Some(value) = self.get_internal(field_name) {
+            return Some(value);
+        }
 
-    content.replace(&old_pattern, &new_pattern)
-}
+        // If not found, try to find as a let binding or inherit
+        self.get_from_let_or_inherit(field_name)
+    }
 
-/// Find platform data structures (platformData or dists)
-pub fn find_platform_data_blocks(node: &SyntaxNode) -> Vec<PlatformBlock> {
-    let mut blocks = Vec::new();
+    /// Helper to get attribute values in Nix AST
+    fn get_internal(&self, attr_name: &str) -> Option<String> {
+        for child in self.ast.syntax().descendants() {
+            if child.kind() == SyntaxKind::NODE_ATTR_SET {
+                for attr_child in child.children() {
+                    if attr_child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
+                        let mut key = None;
+                        let mut value = None;
 
-    for child in node.descendants() {
-        if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
-            && let Some(attr_path) = child.first_child()
-        {
-            let attr_name = attr_path.text().to_string();
+                        for kv_child in attr_child.children() {
+                            match kv_child.kind() {
+                                SyntaxKind::NODE_ATTRPATH => {
+                                    if let Some(ident) = kv_child.first_child()
+                                        && ident.text() == attr_name
+                                    {
+                                        key = Some(attr_name);
+                                    }
+                                }
+                                SyntaxKind::NODE_STRING => {
+                                    value = Some(extract_string_value(&kv_child));
+                                }
+                                SyntaxKind::NODE_IDENT => {
+                                    // Handle identifier references like `repo = pname;`
+                                    value = Some(kv_child.text().to_string());
+                                }
+                                _ => {}
+                            }
+                        }
 
-            if attr_name == "platformData" || attr_name == "dists" {
-                // Found platform data, now look for the immediate attr set
-                for value_node in child.children() {
-                    if value_node.kind() == SyntaxKind::NODE_ATTR_SET {
-                        // This is the platformData/dists attr set
-                        // Look for individual platform entries (direct children only)
-                        for platform_entry in value_node.children() {
-                            if platform_entry.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
-                                && let Some(platform_name_node) = platform_entry.first_child()
-                            {
-                                let platform_name = platform_name_node.text().to_string();
+                        if key.is_some() && value.is_some() {
+                            return value;
+                        }
+                    }
+                }
+            }
+        }
 
-                                // Extract attributes from this platform's attr set
-                                let mut platform_attrs = HashMap::new();
+        None
+    }
 
-                                // Look for the attr set that contains the platform attributes
-                                for platform_value in platform_entry.children() {
-                                    if platform_value.kind() == SyntaxKind::NODE_ATTR_SET {
-                                        // Find filename, hash, platform attributes
-                                        for attr in platform_value.children() {
-                                            if attr.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
-                                                && let Some(attr_name_node) = attr.first_child()
-                                            {
-                                                let attr_name = attr_name_node.text().to_string();
+    /// Get a value from let binding or inherit statement
+    fn get_from_let_or_inherit(&self, binding_name: &str) -> Option<String> {
+        for child in self.ast.syntax().descendants() {
+            // Check for let bindings
+            if child.kind() == SyntaxKind::NODE_LET_IN {
+                for let_child in child.children() {
+                    if let_child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                        && let Some(ident) = let_child.first_child()
+                        && ident.text() == binding_name
+                    {
+                        // Get the value after the = sign
+                        for value_child in let_child.children() {
+                            if value_child.kind() == SyntaxKind::NODE_STRING {
+                                return Some(extract_string_value(&value_child));
+                            }
+                        }
+                    }
+                }
+            }
 
-                                                // Get the value of this attribute
-                                                for attr_value in attr.children() {
-                                                    if attr_value.kind() == SyntaxKind::NODE_STRING {
-                                                        let value = extract_string_value(&attr_value);
+            // Check for inherit statements
+            if child.kind() == SyntaxKind::NODE_INHERIT {
+                for inherit_child in child.children() {
+                    if inherit_child.kind() == SyntaxKind::NODE_IDENT && inherit_child.text() == binding_name {
+                        // For inherit, we need to look for the actual value elsewhere
+                        // This is a simplified version - inherit can be complex
+                        return None;
+                    }
+                }
+            }
+        }
 
-                                                        platform_attrs.insert(attr_name.clone(), value);
+        None
+    }
 
-                                                        break;
+    /// Get platform data structures (platformData or dists)
+    pub fn platforms(&self) -> Vec<PlatformBlock> {
+        let mut blocks = Vec::new();
+
+        for child in self.ast.syntax().descendants() {
+            if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                && let Some(attr_path) = child.first_child()
+            {
+                let attr_name = attr_path.text().to_string();
+
+                if attr_name == "platformData" || attr_name == "dists" {
+                    // Found platform data, now look for the immediate attr set
+                    for value_node in child.children() {
+                        if value_node.kind() == SyntaxKind::NODE_ATTR_SET {
+                            // This is the platformData/dists attr set
+                            // Look for individual platform entries (direct children only)
+                            for platform_entry in value_node.children() {
+                                if platform_entry.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                                    && let Some(platform_name_node) = platform_entry.first_child()
+                                {
+                                    let platform_name = platform_name_node.text().to_string();
+
+                                    // Extract attributes from this platform's attr set
+                                    let mut platform_attrs = HashMap::new();
+
+                                    // Look for the attr set that contains the platform attributes
+                                    for platform_value in platform_entry.children() {
+                                        if platform_value.kind() == SyntaxKind::NODE_ATTR_SET {
+                                            // Find filename, hash, platform attributes
+                                            for attr in platform_value.children() {
+                                                if attr.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                                                    && let Some(attr_name_node) = attr.first_child()
+                                                {
+                                                    let attr_name = attr_name_node.text().to_string();
+
+                                                    // Get the value of this attribute
+                                                    for attr_value in attr.children() {
+                                                        if attr_value.kind() == SyntaxKind::NODE_STRING {
+                                                            let value = extract_string_value(&attr_value);
+
+                                                            platform_attrs.insert(attr_name.clone(), value);
+
+                                                            break;
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                }
 
-                                if !platform_attrs.is_empty() {
-                                    blocks.push(PlatformBlock {
-                                        platform_name: platform_name.trim_matches('"').to_string(),
-                                        attributes: platform_attrs,
-                                    });
+                                    if !platform_attrs.is_empty() {
+                                        blocks.push(PlatformBlock {
+                                            platform_name: platform_name.trim_matches('"').to_string(),
+                                            attributes: platform_attrs,
+                                        });
+                                    }
                                 }
                             }
-                        }
 
-                        break; // Don't look deeper
+                            break; // Don't look deeper
+                        }
                     }
                 }
             }
         }
+
+        blocks
     }
 
-    blocks
+    /// Update platform hashes for PyPI packages
+    /// Returns (old_hash, new_hash) for the first platform updated, if any
+    pub fn update_pypi_hashes(&mut self, releases: &[PyPiReleaseFile], _source_type: &str) -> Result<Option<(String, String)>> {
+        // Check for platformData or dists structures
+        let platform_blocks = self.platforms();
+        let mut first_hash_change = None;
+
+        for block in platform_blocks {
+            if let Some(platform_value) = block.attributes.get("platform")
+                && let Some(old_hash) = block.attributes.get("hash")
+            {
+                // Find matching release
+                let mut url = None;
+
+                for wheel in releases {
+                    if wheel.filename.contains(platform_value) {
+                        url = Some(wheel.url.clone());
+                        break;
+                    }
+                }
+
+                if let Some(url) = url {
+                    println!("Updating hash for platform {}", block.platform_name);
+
+                    if let Some(new_hash) = Nix::prefetch_hash(&url)? {
+                        // Update the hash in the AST
+                        self.set("hash", old_hash, &new_hash)?;
+
+                        // Track the first hash change for reporting
+                        if first_hash_change.is_none() {
+                            first_hash_change = Some((old_hash.clone(), new_hash));
+                        }
+                    } else {
+                        eprintln!("{}", format!("Failed to get hash for platform {}", block.platform_name).red());
+                    }
+                } else {
+                    eprintln!("{}", format!("No wheel found for platform {platform_value}").yellow());
+                }
+            }
+        }
+
+        Ok(first_hash_change)
+    }
+
+    /// Update platform hashes for GitHub packages
+    /// Returns (old_hash, new_hash) for the first platform updated, if any
+    pub fn update_github_hashes(&mut self, release_data: &serde_json::Value) -> Result<Option<(String, String)>> {
+        // Check for platformData structures
+        let platform_blocks = self.platforms();
+        let mut first_hash_change = None;
+
+        // Handle structured platform data
+        for block in platform_blocks {
+            if let Some(filename) = block.attributes.get("filename")
+                && let Some(old_hash) = block.attributes.get("hash")
+            {
+                let url = format!(
+                    "https://github.com/{}/releases/download/{}/{}",
+                    release_data["repo"].as_str().unwrap(),
+                    release_data["tag"].as_str().unwrap(),
+                    filename
+                );
+
+                // Get new hash
+                if let Some(new_hash) = Nix::prefetch_hash(&url)? {
+                    self.set("hash", old_hash, &new_hash)?;
+
+                    // Track the first hash change for reporting
+                    if first_hash_change.is_none() {
+                        first_hash_change = Some((old_hash.clone(), new_hash));
+                    }
+                } else {
+                    eprintln!("{}", format!("Failed to get hash for {filename}").red());
+                }
+            }
+        }
+
+        Ok(first_hash_change)
+    }
+
+    /// Update git revision and hash attributes
+    pub fn update_git(&mut self, old_rev: Option<&str>, new_rev: &str, new_hash: &str, old_hash: Option<&str>) -> Result<()> {
+        // Update rev first
+        if let Some(old_rev) = old_rev
+            && !new_rev.is_empty()
+        {
+            self.set("rev", old_rev, new_rev)?;
+
+            // Update version if it contains the old rev
+            if let Some(current_version) = self.get("version")
+                && current_version.contains(old_rev)
+            {
+                let new_version = current_version.replace(old_rev, new_rev);
+                self.set("version", &current_version, &new_version)?;
+            }
+        }
+
+        // Update hash
+        let old_hash_value = if let Some(h) = old_hash { h.to_string() } else { self.get("hash").unwrap_or_default() };
+
+        if !old_hash_value.is_empty() && !new_hash.is_empty() {
+            self.set("hash", &old_hash_value, new_hash)?;
+        }
+
+        Ok(())
+    }
+
+    /// Update vendor hash by building the package and extracting the hash from error output
+    /// Returns (old_hash, new_hash) if successful
+    pub fn update_vendor(&mut self, package_name: &str, package_path: &std::path::Path, hash_type: &str, pb: Option<&ProgressBar>) -> Result<Option<(String, String)>> {
+        if let Some(pb) = pb {
+            pb.set_message(format!("{package_name}: Building to get new {hash_type}Hash..."));
+        } else {
+            println!("{}", format!("{package_name}: Building to get new {hash_type}Hash...").yellow());
+        }
+
+        // Write out the current content so "nix build" can work with the latest changes
+        fs::write(package_path, self.content())?;
+
+        let output = Command::new("nix").args(["build", &format!(".#{package_name}"), "--no-link"]).output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            if let Some(new_hash) = extract_hash_from_error(&stderr) {
+                let attr_name = format!("{hash_type}Hash");
+
+                if let Some(old_hash) = self.get(&attr_name) {
+                    self.set(&attr_name, &old_hash, &new_hash)?;
+                    return Ok(Some((old_hash, new_hash)));
+                }
+                // Handle case where hash is empty or doesn't exist
+                self.set(&attr_name, "", &new_hash)?;
+                return Ok(Some((String::new(), new_hash)));
+            }
+        }
+
+        Ok(None)
+    }
 }

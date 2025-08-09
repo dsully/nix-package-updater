@@ -6,13 +6,11 @@ use std::process::Command;
 
 use indicatif::ProgressBar;
 
-use crate::config::Config;
+use crate::Config;
 use crate::package::Package;
 
-pub fn build_package(package: &Package, pb: Option<&ProgressBar>, build_results_dir: &Path, cache: bool, config: &Config) -> Result<bool> {
-    fs::create_dir_all(build_results_dir)?;
-
-    let log_file = build_results_dir.join(format!("{}.log", package.name));
+pub fn build_package(package: &Package, pb: Option<&ProgressBar>, build_path: &Path, cache: bool, config: &Config) -> Result<bool> {
+    let log_file = build_path.join(format!("{}.log", package.name));
 
     let output = Command::new("nix").args(["build", &format!(".#{}", package.name), "--no-link"]).output()?;
 
@@ -21,8 +19,10 @@ pub fn build_package(package: &Package, pb: Option<&ProgressBar>, build_results_
     fs::write(&log_file, log_content)?;
 
     if output.status.success() {
-        if cache {
-            push_to_cachix(package, pb, config)?;
+        if cache && let Some(ref cachix_name) = config.cachix_name {
+            push_to_cachix(package, pb, cachix_name)?;
+        } else {
+            anyhow::bail!("A cachix name must be set to use the cache!")
         }
 
         Ok(true)
@@ -31,7 +31,7 @@ pub fn build_package(package: &Package, pb: Option<&ProgressBar>, build_results_
     }
 }
 
-pub fn push_to_cachix(package: &Package, pb: Option<&ProgressBar>, config: &Config) -> Result<()> {
+pub fn push_to_cachix(package: &Package, pb: Option<&ProgressBar>, cachix: &str) -> Result<()> {
     //
     if let Some(pb) = pb {
         pb.set_message(format!("Pushing {} to cachix...", package.display_name()));
@@ -47,7 +47,7 @@ pub fn push_to_cachix(package: &Package, pb: Option<&ProgressBar>, config: &Conf
         for path in paths.lines() {
             if !path.is_empty() {
                 let _ = Command::new("cachix")
-                    .args(["push", "--compression-method", "xz", "--compression-level", "6", &config.cachix_name, path])
+                    .args(["push", "--compression-method", "xz", "--compression-level", "6", cachix, path])
                     .output();
             }
         }

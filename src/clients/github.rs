@@ -1,4 +1,5 @@
 use anyhow::Result;
+use git_url_parse::GitUrl;
 use octocrab::Octocrab;
 
 const DEFAULT_BRANCHES: [&str; 2] = ["main", "master"];
@@ -27,7 +28,16 @@ impl GitHubClient {
         Ok(Self { client, runtime })
     }
 
-    pub fn latest_release(&self, owner: &str, repo: &str) -> Result<Option<String>> {
+    fn owner_and_repo_from_url(url: &GitUrl) -> Result<(String, String)> {
+        let owner = url.owner.clone().ok_or_else(|| anyhow::anyhow!("No owner found in URL: {url}"))?;
+        let repo = url.name.clone();
+
+        Ok((owner, repo))
+    }
+
+    pub fn latest_release(&self, url: &GitUrl) -> Result<Option<String>> {
+        let (owner, repo) = Self::owner_and_repo_from_url(url)?;
+
         self.runtime.block_on(async {
             match self.client.repos(owner, repo).releases().get_latest().await {
                 Ok(release) => Ok(Some(release.tag_name)),
@@ -38,7 +48,9 @@ impl GitHubClient {
     }
 
     #[allow(dead_code)]
-    pub fn latest_tag(&self, owner: &str, repo: &str) -> Result<Option<(String, String)>> {
+    pub fn latest_tag(&self, url: &GitUrl) -> Result<Option<(String, String)>> {
+        let (owner, repo) = Self::owner_and_repo_from_url(url)?;
+
         self.runtime.block_on(async {
             // Get all tags sorted by commit date
             let tags = self.client.repos(owner, repo).list_tags().send().await?;
@@ -52,16 +64,18 @@ impl GitHubClient {
         })
     }
 
-    pub fn latest_commit(&self, owner: &str, repo: &str) -> Result<Option<String>> {
+    pub fn latest_commit(&self, url: &GitUrl) -> Result<Option<String>> {
+        let (owner, repo) = Self::owner_and_repo_from_url(url)?;
+
         self.runtime.block_on(async {
             // First try to get the default branch
-            if let Ok(repo_info) = self.client.repos(owner, repo).get().await {
+            if let Ok(repo_info) = self.client.repos(&owner, &repo).get().await {
                 let default_branch = repo_info.default_branch.as_deref().unwrap_or("main");
 
                 // Get the commit SHA for the default branch
                 match self
                     .client
-                    .repos(owner, repo)
+                    .repos(&owner, &repo)
                     .get_ref(&octocrab::params::repos::Reference::Branch(default_branch.to_string()))
                     .await
                 {
@@ -76,7 +90,7 @@ impl GitHubClient {
                 for branch in &DEFAULT_BRANCHES {
                     let Ok(git_ref) = self
                         .client
-                        .repos(owner, repo)
+                        .repos(&owner, &repo)
                         .get_ref(&octocrab::params::repos::Reference::Branch((*branch).to_string()))
                         .await
                     else {
