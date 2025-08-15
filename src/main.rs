@@ -21,7 +21,7 @@ use crate::updater::NixPackageUpdater;
 
 #[derive(Parser, Clone, Debug, Serialize, Deserialize)]
 #[command(
-    name = "nix-updater",
+    name = "nix-package-updater",
     version,
     about = "Update and build Nix packages from various sources",
     long_about = r#"Nix Package Updater
@@ -36,31 +36,28 @@ Update and build Nix packages from various sources:
 Examples:
 
     # Update and build all packages
-    ./update
+    nix-package-updater
 
     # Update specific packages
-    ./update --packages "package1,package2"
+    nix-package-updater package1 package2
 
     # Update only PyPI packages
-    ./update --type pypi
+    nix-package-updater --type pypi
 
     # Build only, no updates
-    ./update --no-update
+    nix-package-updater --no-update
 
     # Force update even if up to date
-    ./update --force
+    nix-package-updater --force
 
     # Push successful builds to cachix
-    ./update --cache
+    nix-package-updater --cache
 
     # Generate shell completions
-    ./update completions bash"#
+    nix-package-updater completions bash"#
 )]
 struct Config {
     packages: Vec<String>,
-
-    #[arg(long, global = true)]
-    cachix_name: Option<String>,
 
     #[arg(long, global = true)]
     exclude: Vec<String>,
@@ -74,7 +71,7 @@ struct Config {
     force: bool,
 
     /// Push successful builds to cachix
-    #[arg(short, long, global = true)]
+    #[arg(short, long, global = true, default_value = "true")]
     cache: bool,
 
     /// Enable verbose output

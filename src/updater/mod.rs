@@ -6,13 +6,12 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::Config;
 use crate::clients::{GitHubClient, PyPiClient};
 use crate::nix::ast::Ast;
 use crate::nix::builder::build_package;
-use crate::package::{Package, UpdateResult};
+use crate::package::{Package, PackageKind};
 
 pub struct NixPackageUpdater {
     pub config: Config,
@@ -35,7 +34,6 @@ impl NixPackageUpdater {
         })
     }
 
-    #[allow(clippy::too_many_lines)]
     pub fn run(&mut self) {
         let mut packages = Package::discover(&self.config.packages, &self.config.exclude);
 
@@ -50,131 +48,79 @@ impl NixPackageUpdater {
         // Create shared resources for parallel processing
         let multi_progress = MultiProgress::new();
 
-        let config = Arc::new(self.config.clone());
-        let mut cleanup = true;
-
-        // Process packages in parallel
-        let results: Vec<_> = packages
-            .par_iter()
+        let _: Vec<_> = packages
+            .par_iter_mut()
             .map(|package| {
-                let config_clone = Arc::clone(&config);
-
                 let pb = multi_progress.add(ProgressBar::new_spinner());
 
                 pb.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
 
-                pb.set_message(format!("Processing {}...", package.display_name()));
+                pb.set_message(format!("Processing {}...", package.name()));
 
-                // Create a new updater instance for this thread
-                let new_updater = NixPackageUpdater::new(self.config.clone());
-
-                let update = match new_updater {
-                    Ok(mut updater) => {
-                        let mut update = updater
-                            .update_package(package, Some(&pb))
-                            .unwrap_or_else(|e| UpdateResult::failed(format!("Updater error: {e}")));
-
-                        if update.updated {
-                            update.built = build_package(package, Some(&pb), &self.build_path, self.config.cache, &config_clone).unwrap_or(false);
-                        }
-
-                        update
+                if let Ok(mut updater) = NixPackageUpdater::new(self.config.clone()) {
+                    //
+                    if let Err(e) = updater.update_package(package, Some(&pb)) {
+                        package.result.failed(format!("Updater error: {e}"));
+                    } else if package.result.updated {
+                        let _ = build_package(package, Some(&pb), &self.build_path, self.config.cache);
                     }
-                    Err(e) => UpdateResult::failed(format!("Updater error: {e}")),
-                };
+                }
 
                 pb.finish_and_clear();
-
-                (package, update)
             })
             .collect();
 
-        //
-        println!("\n{}", "Package Update Results".bold());
-
-        println!("{}", "-".repeat(80));
-
         println!(
-            "{:<30} {:<15} {:<10} {:<10} Details",
-            "Package".cyan(),
-            "Type".magenta(),
-            "Update".yellow(),
-            "Build".green()
+            "{:<30} {:<8} {:<8} {:<8} {:<8} Details",
+            "Package".bright_white().bold(),
+            "Source".bright_white().bold(),
+            "Updated".bright_white().bold(),
+            "Built".bright_white().bold(),
+            "Cached".bright_white().bold()
         );
 
-        println!("{}", "-".repeat(80));
+        println!("{}", "-".repeat(72));
 
-        // Display results in sorted order
-        for (package, result) in results {
-            let update_status = if result.updated { "✓" } else { "✗" };
-            let build_status = if result.built { "✓" } else { "✗" };
-
-            if !result.built {
-                cleanup = false;
-            }
-
+        for package in &packages {
             let mut details = Vec::new();
 
-            let changes: Vec<_> = [
-                match (&result.old_version, &result.new_version) {
-                    (Some(old_v), Some(new_v)) if old_v != new_v => Some(format!("{old_v} → {new_v}")),
-                    _ => None,
-                },
-                match (&result.old_git_commit, &result.new_git_commit) {
-                    (Some(old_h), Some(new_h)) if old_h != new_h => Some(format!("{} → {}", short_hash(old_h), short_hash(new_h))),
-                    _ => None,
-                },
-            ]
-            .into_iter()
-            .flatten()
-            .collect();
+            let changes = package.result.changes();
 
             if !changes.is_empty() {
                 details.push(changes.join(", "));
             }
 
-            if let Some(msg) = &result.message {
+            if let Some(msg) = &package.result.message {
                 details.push(msg.clone());
             }
 
-            // Create hyperlinked package name if homepage is available
-            let package_name_display = package.display_name();
-            let package_name_width = package.display_width();
-
-            // Manually pad the package name to account for escape sequences
-            let package_name_padded = if package_name_width < 30 {
-                format!("{}{}", package_name_display, " ".repeat(30 - package_name_width))
-            } else {
-                package_name_display
-            };
-
             println!(
-                "{} {:<15} {:<10} {:<10} {}",
-                package_name_padded,
+                "{} {:<8} {:<8} {:<8} {:<8} {}",
+                // Pad the package name to account for the OSC-8 codes.
+                format_args!("{}{}", package.name(), " ".repeat(30 - package.display_width())),
                 package.kind.to_string().magenta(),
-                update_status.yellow(),
-                build_status.green(),
+                package.result.status(package.result.updated),
+                package.result.status(package.result.built),
+                package.result.status(package.result.cached),
                 details.join("\n")
             );
         }
 
-        println!("{}", "-".repeat(80));
-
-        if cleanup {
-            let _ = fs::remove_dir_all(&self.build_path);
+        if packages.iter().all(|p| p.result.built) {
+            fs::remove_dir_all(&self.build_path).expect("Failed to remove build directory");
         }
     }
 
-    fn update_package(&mut self, package: &Package, pb: Option<&ProgressBar>) -> Result<UpdateResult> {
-        use crate::package::PackageKind;
-
+    fn update_package(&mut self, package: &mut Package, pb: Option<&ProgressBar>) -> Result<()> {
         if self.config.no_update {
-            return Ok(UpdateResult::message("Skipping update"));
+            package.result.message("Skipping update");
+
+            return Ok(());
         }
 
         match package.kind {
             PackageKind::PyPi => self.update_pypi_package(package),
-            PackageKind::GitHubRelease => self.update_github_package(package),
+            PackageKind::GitHub => self.update_github_package(package),
             PackageKind::Cargo => self.update_rust_package(package, pb),
             PackageKind::Git => self.update_git_package(package, pb),
         }

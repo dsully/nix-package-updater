@@ -1,6 +1,6 @@
 [package]
 name = "nix-package-updater"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 homepage = "https://github.com/dsully/nix-package-updater"
 repository = "https://github.com/dsully/nix-package-updater"
@@ -19,13 +19,15 @@ figment = { version = "0.10.19", features = ["env", "toml"] }
 git-url-parse = "0.4.5"
 indicatif = "0"
 octocrab = "0.44"
-rayon = "1.10"
+rayon = "1.11"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 rnix = "0.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+strum = { version = "0.27.2", features = ["derive"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 walkdir = "2.5"
+whoami = { version = "1.6.1", default-features = false }
 
 # https://stackoverflow.com/a/74545562/81120
 [lints.clippy]

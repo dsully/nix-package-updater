@@ -2,22 +2,24 @@ use anyhow::Result;
 use indicatif::ProgressBar;
 
 use crate::clients::nix::Nix;
-use crate::package::{Package, UpdateResult};
+use crate::package::Package;
 use crate::updater::NixPackageUpdater;
 
 impl NixPackageUpdater {
-    pub fn update_git_package(&mut self, package: &Package, pb: Option<&ProgressBar>) -> Result<UpdateResult> {
+    pub fn update_git_package(&mut self, package: &mut Package, pb: Option<&ProgressBar>) -> Result<()> {
         //
         // Use nurl to get new hash/rev
         let Some((new_hash, new_rev)) = Nix::hash_and_rev(&package.homepage.to_string(), None)? else {
-            return Ok(UpdateResult::failed("nurl failed"));
+            package.result.failed("nurl failed");
+            return Ok(());
         };
 
         let ast_tmp = Self::ast(package);
         let current_rev = ast_tmp.get("rev");
 
         if package.nix_hash == new_hash && current_rev == new_rev && !self.config.force {
-            return Ok(UpdateResult::up_to_date());
+            package.result.up_to_date();
+            return Ok(());
         }
 
         let mut ast = Self::ast(package);
@@ -37,12 +39,12 @@ impl NixPackageUpdater {
 
         Self::write(&ast, package)?;
 
-        let mut result = UpdateResult::success();
+        let result = package.result.success();
 
         if let (Some(old_rev), Some(new_rev)) = (current_rev, new_rev) {
-            result = result.git_commit(old_rev, new_rev);
+            result.git_commit(old_rev, new_rev);
         }
 
-        Ok(result)
+        Ok(())
     }
 }

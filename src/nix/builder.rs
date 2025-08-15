@@ -5,11 +5,11 @@ use std::path::Path;
 use std::process::Command;
 
 use indicatif::ProgressBar;
+use whoami::username;
 
-use crate::Config;
 use crate::package::Package;
 
-pub fn build_package(package: &Package, pb: Option<&ProgressBar>, build_path: &Path, cache: bool, config: &Config) -> Result<bool> {
+pub fn build_package(package: &mut Package, pb: Option<&ProgressBar>, build_path: &Path, cache: bool) -> Result<()> {
     let log_file = build_path.join(format!("{}.log", package.name));
 
     let output = Command::new("nix").args(["build", &format!(".#{}", package.name), "--no-link"]).output()?;
@@ -19,24 +19,22 @@ pub fn build_package(package: &Package, pb: Option<&ProgressBar>, build_path: &P
     fs::write(&log_file, log_content)?;
 
     if output.status.success() {
-        if cache && let Some(ref cachix_name) = config.cachix_name {
-            push_to_cachix(package, pb, cachix_name)?;
-        } else {
-            anyhow::bail!("A cachix name must be set to use the cache!")
-        }
+        package.result.built = true;
 
-        Ok(true)
-    } else {
-        Ok(false)
+        if cache {
+            push_to_cachix(package, pb)?;
+        }
     }
+
+    Ok(())
 }
 
-pub fn push_to_cachix(package: &Package, pb: Option<&ProgressBar>, cachix: &str) -> Result<()> {
+pub fn push_to_cachix(package: &mut Package, pb: Option<&ProgressBar>) -> Result<()> {
     //
     if let Some(pb) = pb {
-        pb.set_message(format!("Pushing {} to cachix...", package.display_name()));
+        pb.set_message(format!("Pushing {} to cachix...", package.name()));
     } else {
-        println!("{}", format!("Pushing {} to cachix...", package.display_name()).cyan());
+        println!("{}", format!("Pushing {} to cachix...", package.name()).cyan());
     }
 
     let output = Command::new("nix").args(["path-info", &format!(".#{}", package.name)]).output()?;
@@ -46,9 +44,11 @@ pub fn push_to_cachix(package: &Package, pb: Option<&ProgressBar>, cachix: &str)
 
         for path in paths.lines() {
             if !path.is_empty() {
-                let _ = Command::new("cachix")
-                    .args(["push", "--compression-method", "xz", "--compression-level", "6", cachix, path])
-                    .output();
+                Command::new("cachix")
+                    .args(["push", "--compression-method", "xz", "--compression-level", "6", &username(), path])
+                    .output()?;
+
+                package.result.cached = true;
             }
         }
     }

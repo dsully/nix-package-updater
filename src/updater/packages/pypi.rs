@@ -1,19 +1,22 @@
-use crate::package::{Package, UpdateResult};
-use crate::updater::NixPackageUpdater;
 use anyhow::Result;
 
+use crate::package::Package;
+use crate::updater::NixPackageUpdater;
+
 impl NixPackageUpdater {
-    pub fn update_pypi_package(&self, package: &Package) -> Result<UpdateResult> {
+    pub fn update_pypi_package(&self, package: &mut Package) -> Result<()> {
         //
         // Get latest version from PyPI using the client
         let Some(data) = self.pypi_client.project(&package.name)? else {
-            return Ok(UpdateResult::failed(format!("Package '{}' not found on PyPI", package.display_name())));
+            package.result.failed(format!("Package '{}' not found on PyPI", package.name()));
+            return Ok(());
         };
 
         let latest_version = data.info.version;
 
         if self.should_skip_update(&package.version, &latest_version) {
-            return Ok(UpdateResult::up_to_date());
+            package.result.up_to_date();
+            return Ok(());
         }
 
         let mut ast = Self::ast(package);
@@ -27,6 +30,8 @@ impl NixPackageUpdater {
 
         Self::write(&ast, package)?;
 
-        Ok(UpdateResult::success().version(package.version.clone(), latest_version))
+        package.result.success().version(package.version.clone(), latest_version);
+
+        Ok(())
     }
 }

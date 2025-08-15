@@ -372,10 +372,11 @@ impl Ast {
 
     /// Update vendor hash by building the package and extracting the hash from error output
     pub fn update_vendor(&mut self, package: &Package, hash_type: &str, pb: Option<&ProgressBar>) -> Result<()> {
+        //
         if let Some(pb) = pb {
-            pb.set_message(format!("{}: Building to get new {hash_type}Hash...", package.display_name()));
+            pb.set_message(format!("{}: Building to get new {hash_type}Hash...", package.name()));
         } else {
-            println!("{}", format!("{}: Building to get new {hash_type}Hash...", package.display_name()).yellow());
+            println!("{}", format!("{}: Building to get new {hash_type}Hash...", package.name()).yellow());
         }
 
         // Write out the current content so "nix build" can work with the latest changes

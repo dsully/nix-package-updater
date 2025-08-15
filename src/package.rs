@@ -1,91 +1,21 @@
 use std::fs;
 use std::path::PathBuf;
 
-use colored::Colorize;
+use colored::{ColoredString, Colorize};
 use git_url_parse::GitUrl;
 use rnix::{Parse, Root};
+use strum::Display;
 use walkdir::WalkDir;
 
 use crate::nix::ast::Ast;
+use crate::updater::short_hash;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Display, PartialEq, Eq)]
 pub enum PackageKind {
     PyPi,
-    GitHubRelease,
+    GitHub,
     Cargo,
     Git,
-}
-
-impl std::fmt::Display for PackageKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PackageKind::PyPi => write!(f, "PyPI"),
-            PackageKind::GitHubRelease => write!(f, "GitHub Release"),
-            PackageKind::Cargo => write!(f, "Cargo"),
-            PackageKind::Git => write!(f, "Git"),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct UpdateResult {
-    pub updated: bool,
-    pub built: bool,
-    pub message: Option<String>,
-
-    pub old_version: Option<String>,
-    pub new_version: Option<String>,
-
-    pub old_git_commit: Option<String>,
-    pub new_git_commit: Option<String>,
-}
-
-impl UpdateResult {
-    pub fn failed(message: impl Into<String>) -> Self {
-        Self {
-            updated: false,
-            message: Some(message.into()),
-            ..Default::default()
-        }
-    }
-
-    pub fn message(message: impl Into<String>) -> Self {
-        Self {
-            updated: true,
-            message: Some(message.into()),
-            ..Default::default()
-        }
-    }
-
-    pub fn success() -> Self {
-        Self {
-            updated: true,
-            ..Default::default()
-        }
-    }
-
-    pub fn up_to_date() -> Self {
-        Self {
-            updated: true,
-            message: Some("Already up to date".to_string()),
-            ..Default::default()
-        }
-    }
-
-    pub fn version(mut self, old: String, new: String) -> Self {
-        if !old.contains("${") && !old.contains('}') {
-            self.old_version = Some(old);
-            self.new_version = Some(new);
-        }
-
-        self
-    }
-
-    pub fn git_commit(mut self, old: String, new: String) -> Self {
-        self.old_git_commit = Some(old);
-        self.new_git_commit = Some(new);
-        self
-    }
 }
 
 pub struct Package {
@@ -97,6 +27,8 @@ pub struct Package {
 
     pub version: String,
     pub nix_hash: String,
+
+    pub result: UpdateResult,
 }
 
 impl Package {
@@ -134,7 +66,7 @@ impl Package {
                     } else if Ast::contains_function_call(&root, "rustPlatform.buildRustPackage") {
                         PackageKind::Cargo
                     } else if content.contains("github.com") && content.contains("releases") && content.contains("download") {
-                        PackageKind::GitHubRelease
+                        PackageKind::GitHub
                     } else {
                         PackageKind::Git
                     };
@@ -153,6 +85,7 @@ impl Package {
                             .get("version")
                             .unwrap_or_else(|| panic!("Failed to find 'version' attribute in: {}", path.display())),
                         ast: ast.clone(),
+                        result: UpdateResult::default(),
                     });
                 }
             }
@@ -162,12 +95,91 @@ impl Package {
     }
 
     /// Format the package name with hyperlink if homepage is available
-    pub fn display_name(&self) -> String {
+    pub fn name(&self) -> String {
         format!("\x1B]8;;{}\x1B\\{}\x1B]8;;\x1B\\", &self.homepage.to_string(), &self.name).cyan().to_string()
     }
 
     /// Get the visual display width of the package name (excluding escape sequences)
     pub fn display_width(&self) -> usize {
         self.name.len()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct UpdateResult {
+    pub failed: bool,
+    pub updated: bool,
+    pub built: bool,
+    pub cached: bool,
+    pub message: Option<String>,
+
+    pub old_version: Option<String>,
+    pub new_version: Option<String>,
+
+    pub old_git_commit: Option<String>,
+    pub new_git_commit: Option<String>,
+}
+
+impl UpdateResult {
+    pub fn status(&self, flag: bool) -> ColoredString {
+        match (self.failed, flag) {
+            (true, _) => "✗".red(),
+            (false, true) => "✓".green(),
+            (false, false) => "-".yellow(),
+        }
+    }
+
+    pub fn failed(&mut self, message: impl Into<String>) -> &mut Self {
+        self.failed = true;
+        self.message = Some(message.into());
+        self
+    }
+
+    pub fn message(&mut self, message: impl Into<String>) -> &mut Self {
+        self.message = Some(message.into());
+        self
+    }
+
+    pub fn success(&mut self) -> &mut Self {
+        self.updated = true;
+        self
+    }
+
+    pub fn up_to_date(&mut self) -> &mut Self {
+        self.message = Some("Up to date".to_string());
+        self
+    }
+
+    pub fn version(&mut self, old: String, new: String) -> &mut Self {
+        if !old.contains("${") && !old.contains('}') {
+            self.old_version = Some(old);
+            self.new_version = Some(new);
+        }
+
+        self
+    }
+
+    pub fn git_commit(&mut self, old: String, new: String) -> &mut Self {
+        self.old_git_commit = Some(old);
+        self.new_git_commit = Some(new);
+        self
+    }
+
+    pub fn changes(&self) -> Vec<String> {
+        let mut changes = Vec::new();
+
+        if let (Some(o), Some(n)) = (&self.old_version, &self.new_version)
+            && o != n
+        {
+            changes.push(format!("{o} → {n}"));
+        }
+
+        if let (Some(o), Some(n)) = (&self.old_git_commit, &self.new_git_commit)
+            && o != n
+        {
+            changes.push(format!("{} → {}", short_hash(o), short_hash(n)));
+        }
+
+        changes
     }
 }

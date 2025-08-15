@@ -4,7 +4,6 @@ use octocrab::Octocrab;
 
 const DEFAULT_BRANCHES: [&str; 2] = ["main", "master"];
 
-// GitHub client using octocrab
 pub struct GitHubClient {
     client: Octocrab,
     runtime: tokio::runtime::Runtime,

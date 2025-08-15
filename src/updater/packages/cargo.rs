@@ -2,30 +2,34 @@ use anyhow::Result;
 use indicatif::ProgressBar;
 
 use crate::clients::nix::Nix;
-use crate::package::{Package, UpdateResult};
+use crate::package::Package;
 use crate::updater::{NixPackageUpdater, short_hash};
 
 impl NixPackageUpdater {
-    pub fn update_rust_package(&mut self, package: &Package, pb: Option<&ProgressBar>) -> Result<UpdateResult> {
+    pub fn update_rust_package(&mut self, package: &mut Package, pb: Option<&ProgressBar>) -> Result<()> {
         // Get current hash before any updates
         //
         let ast_tmp = Self::ast(package);
 
         let Some(current_git_commit) = ast_tmp.get("rev") else {
-            return Ok(UpdateResult::failed("Could not extract rev"));
+            package.result.failed("Could not extract rev");
+            return Ok(());
         };
 
         let Some(latest_git_commit) = self.github_client.latest_commit(&package.homepage)? else {
-            return Ok(UpdateResult::failed("Failed to fetch latest commit"));
+            package.result.failed("Failed to fetch latest commit");
+            return Ok(());
         };
 
         if self.should_skip_update(&current_git_commit, &latest_git_commit) {
-            return Ok(UpdateResult::up_to_date());
+            package.result.up_to_date();
+            return Ok(());
         }
 
         // Update using nurl
         let Some((new_hash, _)) = Nix::hash_and_rev(&package.homepage.to_string(), Some(&latest_git_commit))? else {
-            return Ok(UpdateResult::failed("Failed to get new hash"));
+            package.result.failed("Failed to get new hash");
+            return Ok(());
         };
 
         let mut ast = Self::ast(package);
@@ -50,8 +54,12 @@ impl NixPackageUpdater {
 
         Self::write(&ast, package)?;
 
-        Ok(UpdateResult::success()
+        package
+            .result
+            .success()
             .version(package.version.clone(), latest_version)
-            .git_commit(current_git_commit.clone(), latest_git_commit.clone()))
+            .git_commit(current_git_commit.clone(), latest_git_commit.clone());
+
+        Ok(())
     }
 }

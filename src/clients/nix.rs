@@ -27,32 +27,25 @@ impl Nix {
         let output = Command::new("nix").args(["store", "prefetch-file", url, "--json"]).output()?;
 
         if output.status.success() {
-            Ok(Some(serde_json::from_slice::<NixPrefetchResult>(&output.stdout)?.hash))
-        } else {
-            Ok(None)
+            return Ok(Some(serde_json::from_slice::<NixPrefetchResult>(&output.stdout)?.hash));
         }
+
+        Ok(None)
     }
 
     pub fn hash_and_rev(url: &str, rev: Option<&str>) -> Result<Option<(String, Option<String>)>> {
-        let mut cmd = Command::new("nurl");
-        cmd.arg("--json").arg(url);
+        let output = Command::new("nurl").arg("--json").arg(url).args(rev.as_ref()).output()?;
 
-        if let Some(r) = rev {
-            cmd.arg(r);
+        if output.status.success() {
+            return match String::from_utf8_lossy(&output.stdout).trim_end().lines().last() {
+                Some(last_line) if !last_line.is_empty() => {
+                    let result: NurlResult = serde_json::from_str(last_line)?;
+                    Ok(Some((result.args.hash, result.args.rev)))
+                }
+                _ => Ok(None),
+            };
         }
 
-        let output = cmd.output()?;
-
-        if !output.status.success() {
-            return Ok(None);
-        }
-
-        match String::from_utf8_lossy(&output.stdout).trim_end().lines().last() {
-            Some(last_line) if !last_line.is_empty() => {
-                let result: NurlResult = serde_json::from_str(last_line)?;
-                Ok(Some((result.args.hash, result.args.rev)))
-            }
-            _ => Ok(None),
-        }
+        Ok(None)
     }
 }
