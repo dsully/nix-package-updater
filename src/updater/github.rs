@@ -1,25 +1,40 @@
 use anyhow::Result;
+use indicatif::ProgressBar;
 
+use crate::Config;
+use crate::clients::GitHubClient;
 use crate::clients::nix::Nix;
 use crate::package::Package;
-use crate::updater::NixPackageUpdater;
+use crate::updater::Updater;
 
-impl NixPackageUpdater {
-    pub fn update_github_package(&self, package: &mut Package) -> Result<()> {
+pub struct GitHubRelease {
+    pub config: Config,
+    pub client: GitHubClient,
+}
+
+impl Updater for GitHubRelease {
+    fn new(config: &Config) -> Result<Self> {
+        Ok(Self {
+            config: config.clone(),
+            client: GitHubClient::new()?,
+        })
+    }
+
+    fn update(&self, package: &mut Package, _pb: Option<&ProgressBar>) -> Result<()> {
         //
-        let Some(latest_tag) = self.github_client.latest_release(&package.homepage)? else {
+        let Some(latest_tag) = self.client.latest_release(&package.homepage)? else {
             package.result.message("No releases found on GitHub - keeping current version");
             return Ok(());
         };
 
         let latest_version = latest_tag.trim_start_matches('v').to_string();
 
-        if self.should_skip_update(&package.version, &latest_version) {
+        if self.should_skip_update(self.config.force, &package.version, &latest_version) {
             package.result.up_to_date();
             return Ok(());
         }
 
-        let mut ast = Self::ast(package);
+        let mut ast = package.ast();
 
         ast.set("version", &package.version, &latest_version)?;
 
@@ -42,7 +57,7 @@ impl NixPackageUpdater {
 
         ast.update_github_hashes(&release_data)?;
 
-        Self::write(&ast, package)?;
+        package.write(&ast)?;
 
         package.result.success().version(package.version.clone(), latest_version);
 

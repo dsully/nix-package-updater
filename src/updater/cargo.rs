@@ -1,27 +1,41 @@
 use anyhow::Result;
 use indicatif::ProgressBar;
 
+use crate::Config;
+use crate::clients::GitHubClient;
 use crate::clients::nix::Nix;
 use crate::package::Package;
-use crate::updater::{NixPackageUpdater, short_hash};
+use crate::updater::{Updater, short_hash};
 
-impl NixPackageUpdater {
-    pub fn update_rust_package(&mut self, package: &mut Package, pb: Option<&ProgressBar>) -> Result<()> {
+pub struct Cargo {
+    pub config: Config,
+    pub client: GitHubClient,
+}
+
+impl Updater for Cargo {
+    fn new(config: &Config) -> Result<Self> {
+        Ok(Self {
+            config: config.clone(),
+            client: GitHubClient::new()?,
+        })
+    }
+
+    fn update(&self, package: &mut Package, pb: Option<&ProgressBar>) -> Result<()> {
         // Get current hash before any updates
         //
-        let ast_tmp = Self::ast(package);
+        let ast_tmp = package.ast();
 
         let Some(current_git_commit) = ast_tmp.get("rev") else {
             package.result.failed("Could not extract rev");
             return Ok(());
         };
 
-        let Some(latest_git_commit) = self.github_client.latest_commit(&package.homepage)? else {
+        let Some(latest_git_commit) = self.client.latest_commit(&package.homepage)? else {
             package.result.failed("Failed to fetch latest commit");
             return Ok(());
         };
 
-        if self.should_skip_update(&current_git_commit, &latest_git_commit) {
+        if self.should_skip_update(self.config.force, &current_git_commit, &latest_git_commit) {
             package.result.up_to_date();
             return Ok(());
         }
@@ -32,7 +46,7 @@ impl NixPackageUpdater {
             return Ok(());
         };
 
-        let mut ast = Self::ast(package);
+        let mut ast = package.ast();
 
         // Update rev and hash
         ast.update_git(Some(&current_git_commit), &latest_git_commit, &new_hash, None)?;
@@ -52,7 +66,7 @@ impl NixPackageUpdater {
         // Update cargoHash
         ast.update_vendor(package, "cargo", pb)?;
 
-        Self::write(&ast, package)?;
+        package.write(&ast)?;
 
         package
             .result

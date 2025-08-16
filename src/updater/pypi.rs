@@ -1,25 +1,40 @@
 use anyhow::Result;
+use indicatif::ProgressBar;
 
+use crate::Config;
+use crate::clients::PyPiClient;
 use crate::package::Package;
-use crate::updater::NixPackageUpdater;
+use crate::updater::Updater;
 
-impl NixPackageUpdater {
-    pub fn update_pypi_package(&self, package: &mut Package) -> Result<()> {
+pub struct PyPiUpdater {
+    pub config: Config,
+    pub client: PyPiClient,
+}
+
+impl Updater for PyPiUpdater {
+    fn new(config: &Config) -> Result<Self> {
+        Ok(Self {
+            config: config.clone(),
+            client: PyPiClient::new(),
+        })
+    }
+
+    fn update(&self, package: &mut Package, _pb: Option<&ProgressBar>) -> Result<()> {
         //
         // Get latest version from PyPI using the client
-        let Some(data) = self.pypi_client.project(&package.name)? else {
+        let Some(data) = self.client.project(&package.name)? else {
             package.result.failed(format!("Package '{}' not found on PyPI", package.name()));
             return Ok(());
         };
 
         let latest_version = data.info.version;
 
-        if self.should_skip_update(&package.version, &latest_version) {
+        if self.should_skip_update(self.config.force, &package.version, &latest_version) {
             package.result.up_to_date();
             return Ok(());
         }
 
-        let mut ast = Self::ast(package);
+        let mut ast = package.ast();
 
         // Update platform hashes
         if let Some(releases) = data.releases.get(&latest_version) {
@@ -28,7 +43,7 @@ impl NixPackageUpdater {
 
         ast.set("version", &package.version, &latest_version)?;
 
-        Self::write(&ast, package)?;
+        package.write(&ast)?;
 
         package.result.success().version(package.version.clone(), latest_version);
 

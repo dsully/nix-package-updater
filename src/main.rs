@@ -5,8 +5,9 @@ mod nix;
 mod package;
 mod updater;
 
-use std::io;
+use std::path::PathBuf;
 use std::str::FromStr;
+use std::{fs, io};
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
@@ -15,9 +16,17 @@ use colored::Colorize;
 use etcetera::base_strategy::{BaseStrategy, choose_base_strategy};
 use figment::Figment;
 use figment::providers::{Env, Format, Serialized, Toml};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::updater::NixPackageUpdater;
+use crate::nix::builder::build_package;
+use crate::package::{Package, PackageKind, UpdateStatus};
+use crate::updater::Updater;
+use crate::updater::cargo::Cargo;
+use crate::updater::git::GitRepository;
+use crate::updater::github::GitHubRelease;
+use crate::updater::pypi::PyPiUpdater;
 
 #[derive(Parser, Clone, Debug, Serialize, Deserialize)]
 #[command(
@@ -45,7 +54,7 @@ Examples:
     nix-package-updater --type pypi
 
     # Build only, no updates
-    nix-package-updater --no-update
+    nix-package-updater --build-only
 
     # Force update even if up to date
     nix-package-updater --force
@@ -64,7 +73,7 @@ struct Config {
 
     /// Skip updating packages, only build
     #[arg(long, global = true)]
-    no_update: bool,
+    build_only: bool,
 
     /// Force update even if packages are up to date
     #[arg(short, long, global = true)]
@@ -109,16 +118,96 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut updater = match NixPackageUpdater::new(config) {
-        Ok(updater) => updater,
-        Err(e) => {
-            eprintln!("\n{}", format!("Error initializing updater: {e}").red());
+    let mut packages = [PathBuf::from("packages/"), PathBuf::from("nix/packages/")]
+        .iter()
+        .flat_map(|path| Package::discover(&PathBuf::from(path), &config.packages, &config.exclude))
+        .collect::<Vec<_>>();
 
-            std::process::exit(1);
+    if packages.is_empty() {
+        println!("{}", "No packages found to process".yellow());
+        return Ok(());
+    }
+
+    let build_path = PathBuf::from("build-results");
+
+    let multi_progress = MultiProgress::new();
+
+    let _: Vec<_> = packages
+        .par_iter_mut()
+        .map(|package| {
+            let pb = multi_progress.add(ProgressBar::new_spinner());
+
+            pb.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
+
+            pb.set_message(format!("Checking {}...", package.name()));
+
+            if !config.build_only {
+                let _ = match package.kind {
+                    PackageKind::PyPi => PyPiUpdater::new(&config).and_then(|u| u.update(package, Some(&pb))),
+                    PackageKind::GitHub => GitHubRelease::new(&config).and_then(|u| u.update(package, Some(&pb))),
+                    PackageKind::Cargo => Cargo::new(&config).and_then(|u| u.update(package, Some(&pb))),
+                    PackageKind::Git => GitRepository::new(&config).and_then(|u| u.update(package, Some(&pb))),
+                };
+            }
+
+            if package.result.status.contains(&UpdateStatus::Updated) {
+                let _ = build_package(package, Some(&pb), &build_path, config.cache);
+            }
+
+            pb.finish_and_clear();
+        })
+        .collect();
+
+    if packages.iter().all(|p| p.result.status.contains(&UpdateStatus::UpToDate)) {
+        println!("{}", "No packages needed updating.".yellow());
+        return Ok(());
+    }
+
+    println!(
+        "{:<30} {:<8} {:<8} {:<8} {:<8} Details",
+        "Package".bright_white().bold(),
+        "Source".bright_white().bold(),
+        "Updated".bright_white().bold(),
+        "Built".bright_white().bold(),
+        "Cached".bright_white().bold()
+    );
+
+    println!("{}", "-".repeat(72));
+
+    packages.sort_by(|a, b| a.name.cmp(&b.name));
+
+    for package in &packages {
+        if package.result.status.contains(&UpdateStatus::UpToDate) {
+            continue;
         }
-    };
 
-    updater.run();
+        let mut details = Vec::new();
+
+        let changes = package.result.changes();
+
+        if !changes.is_empty() {
+            details.push(changes.join(", "));
+        }
+
+        if let Some(msg) = &package.result.message {
+            details.push(msg.clone());
+        }
+
+        println!(
+            "{} {:<8} {:<8} {:<8} {:<8} {}",
+            // Pad the package name to account for the OSC-8 codes.
+            format_args!("{}{}", package.name(), " ".repeat(30 - package.display_width())),
+            package.kind.to_string().magenta(),
+            package.result.status(UpdateStatus::Updated),
+            package.result.status(UpdateStatus::Built),
+            package.result.status(UpdateStatus::Cached),
+            details.join("\n")
+        );
+    }
+
+    if packages.iter().all(|p| p.result.status.contains(&UpdateStatus::Built)) {
+        fs::remove_dir_all(&build_path).expect("Failed to remove build directory");
+    }
 
     Ok(())
 }
