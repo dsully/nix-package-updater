@@ -44,8 +44,7 @@ impl Updater for PyPiUpdater {
         ast.set("version", &package.version, &latest_version)?;
 
         package.write(&ast)?;
-
-        package.result.success().version(package.version.clone(), latest_version);
+        package.result.version(Some(package.version.as_ref()), Some(latest_version.as_ref()));
 
         Ok(())
     }

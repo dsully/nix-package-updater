@@ -5,8 +5,9 @@ mod nix;
 mod package;
 mod updater;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::Duration;
 use std::{fs, io};
 
 use anyhow::Result;
@@ -17,6 +18,7 @@ use etcetera::base_strategy::{BaseStrategy, choose_base_strategy};
 use figment::Figment;
 use figment::providers::{Env, Format, Serialized, Toml};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use itertools::Itertools;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -118,10 +120,10 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut packages = [PathBuf::from("packages/"), PathBuf::from("nix/packages/")]
+    let mut packages = ["packages/", "nix/packages/"]
         .iter()
-        .flat_map(|path| Package::discover(&PathBuf::from(path), &config.packages, &config.exclude))
-        .collect::<Vec<_>>();
+        .flat_map(|&path| Package::discover(Path::new(path), &config.packages, &config.exclude))
+        .collect_vec();
 
     if packages.is_empty() {
         println!("{}", "No packages found to process".yellow());
@@ -130,33 +132,37 @@ fn main() -> Result<()> {
 
     let build_path = PathBuf::from("build-results");
 
-    let multi_progress = MultiProgress::new();
+    let multi = MultiProgress::new();
 
-    let _: Vec<_> = packages
-        .par_iter_mut()
-        .map(|package| {
-            let pb = multi_progress.add(ProgressBar::new_spinner());
+    let progress = multi.add(ProgressBar::new_spinner());
+    progress.enable_steady_tick(Duration::from_millis(50));
+    progress.set_style(
+        ProgressStyle::with_template("{spinner:.cyan.bold} {msg}")
+            .expect("Couldn't set spinner style")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ "),
+    );
 
-            pb.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
+    packages.par_iter_mut().for_each(|package| {
+        //
+        let pb = multi.add(progress.clone());
 
-            pb.set_message(format!("Checking {}...", package.name()));
+        if !config.build_only {
+            pb.set_message(format!("Checking {} for version updates ...", package.name()));
 
-            if !config.build_only {
-                let _ = match package.kind {
-                    PackageKind::PyPi => PyPiUpdater::new(&config).and_then(|u| u.update(package, Some(&pb))),
-                    PackageKind::GitHub => GitHubRelease::new(&config).and_then(|u| u.update(package, Some(&pb))),
-                    PackageKind::Cargo => Cargo::new(&config).and_then(|u| u.update(package, Some(&pb))),
-                    PackageKind::Git => GitRepository::new(&config).and_then(|u| u.update(package, Some(&pb))),
-                };
-            }
+            let _ = match package.kind {
+                PackageKind::PyPi => PyPiUpdater::new(&config).and_then(|u| u.update(package, Some(&pb))),
+                PackageKind::GitHub => GitHubRelease::new(&config).and_then(|u| u.update(package, Some(&pb))),
+                PackageKind::Cargo => Cargo::new(&config).and_then(|u| u.update(package, Some(&pb))),
+                PackageKind::Git => GitRepository::new(&config).and_then(|u| u.update(package, Some(&pb))),
+            };
+        }
 
-            if package.result.status.contains(&UpdateStatus::Updated) {
-                let _ = build_package(package, Some(&pb), &build_path, config.cache);
-            }
+        if package.result.status.contains(&UpdateStatus::Updated) || config.force {
+            let _ = build_package(package, &pb, &build_path, config.cache);
+        }
 
-            pb.finish_and_clear();
-        })
-        .collect();
+        pb.finish_and_clear();
+    });
 
     if packages.iter().all(|p| p.result.status.contains(&UpdateStatus::UpToDate)) {
         println!("{}", "No packages needed updating.".yellow());
@@ -172,38 +178,34 @@ fn main() -> Result<()> {
         "Cached".bright_white().bold()
     );
 
-    println!("{}", "-".repeat(72));
+    println!("{}", "-".repeat(74));
 
-    packages.sort_by(|a, b| a.name.cmp(&b.name));
+    packages
+        .iter()
+        .filter(|package| !package.is_up_to_date())
+        .sorted_by(|a, b| a.name.cmp(&b.name))
+        .for_each(|package| {
+            let mut details = Vec::new();
 
-    for package in &packages {
-        if package.result.status.contains(&UpdateStatus::UpToDate) {
-            continue;
-        }
+            if !package.result.changes.is_empty() {
+                details.push(package.result.changes.join(", "));
+            }
 
-        let mut details = Vec::new();
+            if let Some(msg) = &package.result.message {
+                details.push(msg.clone());
+            }
 
-        let changes = package.result.changes();
-
-        if !changes.is_empty() {
-            details.push(changes.join(", "));
-        }
-
-        if let Some(msg) = &package.result.message {
-            details.push(msg.clone());
-        }
-
-        println!(
-            "{} {:<8} {:<8} {:<8} {:<8} {}",
-            // Pad the package name to account for the OSC-8 codes.
-            format_args!("{}{}", package.name(), " ".repeat(30 - package.display_width())),
-            package.kind.to_string().magenta(),
-            package.result.status(UpdateStatus::Updated),
-            package.result.status(UpdateStatus::Built),
-            package.result.status(UpdateStatus::Cached),
-            details.join("\n")
-        );
-    }
+            println!(
+                "{} {:<8} {:<8} {:<8} {:<8} {}",
+                // Pad the package name to account for the OSC-8 codes.
+                format_args!("{}{}", package.name(), " ".repeat(30 - package.display_width())),
+                package.kind.to_string().magenta(),
+                package.result.status(UpdateStatus::Updated),
+                package.result.status(UpdateStatus::Built),
+                package.result.status(UpdateStatus::Cached),
+                details.join("\n")
+            );
+        });
 
     if packages.iter().all(|p| p.result.status.contains(&UpdateStatus::Built)) {
         fs::remove_dir_all(&build_path).expect("Failed to remove build directory");

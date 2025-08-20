@@ -19,6 +19,8 @@ pub trait Updater: Sized {
 }
 
 /// Create a short git hash (first 8 characters) from a full hash or revision
-pub fn short_hash(hash: &str) -> String {
+pub fn short_hash(hash: impl AsRef<str>) -> String {
+    let hash = hash.as_ref();
+
     hash.strip_prefix("sha256-").unwrap_or(hash).chars().take(8).collect()
 }

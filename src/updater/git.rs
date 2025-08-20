@@ -24,15 +24,15 @@ impl Updater for GitRepository {
         };
 
         let mut ast = package.ast();
-        let current_rev = ast.get("rev");
+        let old_rev = ast.get("rev");
 
-        if package.nix_hash == new_hash && current_rev == new_rev && !self.config.force {
+        if package.nix_hash == new_hash && old_rev == new_rev && !self.config.force {
             package.result.up_to_date();
             return Ok(());
         }
 
         // Update rev and hash
-        ast.update_git(current_rev.as_deref(), &new_rev.clone().unwrap_or_default(), &new_hash, Some(&package.nix_hash))?;
+        ast.update_git(old_rev.as_deref(), &new_rev.clone().unwrap_or_default(), &new_hash, Some(&package.nix_hash))?;
 
         // Clear cargo/vendor hashes if they exist
         if let Some(old_vendor) = ast.get("vendorHash") {
@@ -45,12 +45,7 @@ impl Updater for GitRepository {
         }
 
         package.write(&ast)?;
-
-        let result = package.result.success();
-
-        if let (Some(old_rev), Some(new_rev)) = (current_rev, new_rev) {
-            result.git_commit(old_rev, new_rev);
-        }
+        package.result.git_commit(old_rev.as_deref(), new_rev.as_deref());
 
         Ok(())
     }

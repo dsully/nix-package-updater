@@ -58,8 +58,7 @@ impl Updater for GitHubRelease {
         ast.update_github_hashes(&release_data)?;
 
         package.write(&ast)?;
-
-        package.result.success().version(package.version.clone(), latest_version);
+        package.result.version(Some(package.version.as_ref()), Some(latest_version.as_ref()));
 
         Ok(())
     }

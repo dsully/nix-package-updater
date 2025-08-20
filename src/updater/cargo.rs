@@ -70,9 +70,8 @@ impl Updater for Cargo {
 
         package
             .result
-            .success()
-            .version(package.version.clone(), latest_version)
-            .git_commit(current_git_commit.clone(), latest_git_commit.clone());
+            .git_commit(Some(current_git_commit.as_ref()), Some(latest_git_commit.as_ref()))
+            .version(Some(package.version.as_ref()), Some(latest_version.as_ref()));
 
         Ok(())
     }

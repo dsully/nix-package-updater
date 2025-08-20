@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use colored::{ColoredString, Colorize};
@@ -34,7 +34,7 @@ pub struct Package {
 }
 
 impl Package {
-    pub fn discover(root: &PathBuf, include: &[String], exclude: &[String]) -> Vec<Package> {
+    pub fn discover(root: &Path, include: &[String], exclude: &[String]) -> Vec<Package> {
         let mut packages = Vec::new();
 
         for entry in WalkDir::new(root)
@@ -106,14 +106,16 @@ impl Package {
         self.name.len()
     }
 
-    /// Common helper to create an Ast from a package
     pub fn ast(&self) -> Ast {
         Ast::from_ast(self.ast.clone())
     }
 
-    /// Common helper to finalize an Ast by writing to file
     pub fn write(&self, ast: &Ast) -> Result<()> {
         Ok(std::fs::write(&self.path, ast.content())?)
+    }
+
+    pub fn is_up_to_date(&self) -> bool {
+        self.result.status.contains(&UpdateStatus::UpToDate)
     }
 }
 
@@ -139,6 +141,8 @@ pub struct UpdateResult {
 
     pub old_git_commit: Option<String>,
     pub new_git_commit: Option<String>,
+
+    pub changes: Vec<String>,
 }
 
 impl UpdateResult {
@@ -150,16 +154,7 @@ impl UpdateResult {
         }
     }
 
-    // pub fn status(&self, check: UpdateStatus) -> ColoredString {
-    //     match (self.status, check) {
-    //         (UpdateStatus::Failed, _) => "✗".red(),
-    //         (_, UpdateStatus::Built | UpdateStatus::Updated | UpdateStatus::Cached) => "✓".green(),
-    //         (_, _) => "-".yellow(),
-    //     }
-    // }
-
     pub fn failed(&mut self, message: impl Into<String>) -> &mut Self {
-        // self.status = UpdateStatus::Failed;
         self.status.clear();
         self.status.insert(UpdateStatus::Failed);
 
@@ -172,47 +167,42 @@ impl UpdateResult {
         self
     }
 
-    pub fn success(&mut self) -> &mut Self {
-        self.status.insert(UpdateStatus::Updated);
-        self
-    }
-
     pub fn up_to_date(&mut self) -> &mut Self {
         self.status.insert(UpdateStatus::UpToDate);
         self.message = Some("Up to date".to_string());
         self
     }
 
-    pub fn version(&mut self, old: String, new: String) -> &mut Self {
-        if !old.contains("${") && !old.contains('}') {
-            self.old_version = Some(old);
-            self.new_version = Some(new);
+    pub fn git_commit(&mut self, old: Option<&str>, new: Option<&str>) -> &mut Self {
+        //
+        if let (Some(o), Some(n)) = (old, new)
+            && o != n
+        {
+            self.status.insert(UpdateStatus::Updated);
+
+            self.changes.push(format!("{} → {}", short_hash(o), short_hash(n)));
+
+            self.old_git_commit = Some(o.to_string());
+            self.new_git_commit = Some(n.to_string());
         }
 
         self
     }
 
-    pub fn git_commit(&mut self, old: String, new: String) -> &mut Self {
-        self.old_git_commit = Some(old);
-        self.new_git_commit = Some(new);
+    pub fn version(&mut self, old: Option<&str>, new: Option<&str>) -> &mut Self {
+        //
+        if let (Some(o), Some(n)) = (old, new)
+            && o != n
+            && (!o.contains("${") && !o.contains('}'))
+        {
+            self.status.insert(UpdateStatus::Updated);
+
+            self.changes.push(format!("{o} → {n}",));
+
+            self.old_version = old.map(String::from);
+            self.new_version = new.map(String::from);
+        }
+
         self
-    }
-
-    pub fn changes(&self) -> Vec<String> {
-        let mut changes = Vec::new();
-
-        if let (Some(o), Some(n)) = (&self.old_version, &self.new_version)
-            && o != n
-        {
-            changes.push(format!("{o} → {n}"));
-        }
-
-        if let (Some(o), Some(n)) = (&self.old_git_commit, &self.new_git_commit)
-            && o != n
-        {
-            changes.push(format!("{} → {}", short_hash(o), short_hash(n)));
-        }
-
-        changes
     }
 }
