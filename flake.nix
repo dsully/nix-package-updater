@@ -39,11 +39,10 @@
           inherit system overlays;
         };
 
-        toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        toolchain = pkgs.rust-bin.stable.latest.minimal;
 
         naersk' = pkgs.callPackage naersk {
           cargo = toolchain;
-          clippy = toolchain;
           rustc = toolchain;
         };
       in {
