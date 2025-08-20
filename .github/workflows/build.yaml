@@ -12,13 +12,43 @@ env:
 
 jobs:
   build:
+    strategy:
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
 
-    runs-on: ubuntu-latest
+        # For this to work, you also need to set CACHIX_AUTH_TOKEN secret in your repository secrets settings.
+        cachixName:
+          - dsully
+
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
-    - run: cargo clippy -- --no-deps -Wclippy::complexity -Wclippy::correctness -Wclippy::pedantic -Wclippy::perf -Wclippy::style -Wclippy::suspicious -Aclippy::doc_markdown -Aclippy::missing_errors_doc -Aclippy::missing_panics_doc
-    - name: Build
-      run: cargo build --verbose
-    #- name: Run tests
-    #  run: cargo test --verbose
+
+    - name: Install nix
+      uses: cachix/install-nix-action@v31
+      with:
+        enable_kvm: false
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+        nix_path: nixpkgs=channel:nixos-unstable
+
+    - name: Setup cachix
+      uses: cachix/cachix-action@v16
+      # Don't replace <YOUR_CACHIX_NAME> here!
+      if: ${{ matrix.cachixName != '<YOUR_CACHIX_NAME>' }}
+      with:
+        name: ${{ matrix.cachixName }}
+        signingKey: "${{ secrets.CACHIX_SIGNING_KEY }}"
+        authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+
+    - name: Build with Nix
+      run: nix build .
+    
+    - name: Push to Cachix
+      run: |
+        nix store sign --key-file ~/.config/nix/signing-key.sec --recursive ./result
+        nix copy --to cachix://nix-package-updater ./result
