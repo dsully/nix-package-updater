@@ -47,8 +47,3 @@ jobs:
 
     - name: Build with Nix
       run: nix build .
-    
-    - name: Push to Cachix
-      run: |
-        nix store sign --key-file ~/.config/nix/signing-key.sec --recursive ./result
-        nix copy --to cachix://nix-package-updater ./result
