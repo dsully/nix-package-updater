@@ -45,7 +45,7 @@
           cargo = toolchain;
           rustc = toolchain;
         };
-      in {
+      in rec {
         # For `nix build` & `nix run`:
         packages = {
           default = naersk'.buildPackage {
@@ -57,6 +57,8 @@
             mode = "clippy";
           };
         };
+
+        defaultPackage = packages.default;
 
         # For `nix develop` (optional, can be skipped):
         devShell = pkgs.mkShell {
