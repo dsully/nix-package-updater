@@ -285,8 +285,6 @@ impl Ast {
                 }
 
                 if let Some(url) = url {
-                    println!("Updating hash for platform {}", block.platform_name);
-
                     if let Some(new_hash) = Nix::prefetch_hash(&url)? {
                         // Update the hash in the AST
                         self.set("hash", old_hash, &new_hash)?;
