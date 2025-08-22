@@ -23,7 +23,7 @@ impl Updater for PyPiUpdater {
         //
         // Get latest version from PyPI using the client
         let Some(data) = self.client.project(&package.name)? else {
-            package.result.failed(format!("Package '{}' not found on PyPI", package.name()));
+            package.result.failed(format!("{}: Package not found on PyPI", package.name()));
             return Ok(());
         };
 

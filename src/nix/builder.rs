@@ -13,7 +13,7 @@ pub fn build_package(package: &mut Package, pb: &ProgressBar, build_path: &Path,
 
     let log_file = build_path.join(format!("{}.log", package.name));
 
-    pb.set_message(format!("Building {} ...", package.name()));
+    pb.set_message(format!("{}: Building ...", package.name()));
 
     let output = Command::new("nix").args(["build", &format!(".#{}", package.name), "--no-link"]).output()?;
 
@@ -34,7 +34,7 @@ pub fn build_package(package: &mut Package, pb: &ProgressBar, build_path: &Path,
 
 pub fn push_to_cachix(package: &mut Package, pb: &ProgressBar) -> Result<()> {
     //
-    pb.set_message(format!("Pushing {} to cachix ...", package.name()));
+    pb.set_message(format!("{}: Pushing to cachix ...", package.name()));
 
     let output = Command::new("nix").args(["path-info", &format!(".#{}", package.name)]).output()?;
 

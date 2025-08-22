@@ -134,20 +134,18 @@ fn main() -> Result<()> {
 
     let multi = MultiProgress::new();
 
-    let progress = multi.add(ProgressBar::new_spinner());
-    progress.enable_steady_tick(Duration::from_millis(50));
-    progress.set_style(
-        ProgressStyle::with_template("{spinner:.cyan.bold} {msg}")
-            .expect("Couldn't set spinner style")
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ "),
-    );
+    let style = ProgressStyle::with_template("{spinner:.cyan.bold} {msg}")
+        .expect("Couldn't set spinner style")
+        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ");
 
     packages.par_iter_mut().for_each(|package| {
         //
-        let pb = multi.add(progress.clone());
+        let pb = multi.add(ProgressBar::new_spinner());
+        pb.enable_steady_tick(Duration::from_millis(50));
+        pb.set_style(style.clone());
 
         if !config.build_only {
-            pb.set_message(format!("Checking {} for version updates ...", package.name()));
+            pb.set_message(format!("{}: Checking for version updates ...", package.name()));
 
             let _ = match package.kind {
                 PackageKind::PyPi => PyPiUpdater::new(&config).and_then(|u| u.update(package, Some(&pb))),
