@@ -3,28 +3,14 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     systems.url = "github:nix-systems/default";
 
-    flake-utils = {
-      url = "github:numtide/flake-utils";
-      inputs = {
-        systems.follows = "systems";
-      };
-    };
+    naersk.url = "github:nix-community/naersk";
+    naersk.inputs.nixpkgs.follows = "nixpkgs";
 
-    naersk = {
-      url = "github:nix-community/naersk";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-      };
-    };
+    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {
-    self,
     flake-utils,
     naersk,
     nixpkgs,
@@ -49,6 +35,7 @@
         # For `nix build` & `nix run`:
         packages = {
           default = naersk'.buildPackage {
+            pname = "nix-package-updater";
             src = ./.;
           };
 
@@ -62,7 +49,6 @@
 
         # For `nix develop` (optional, can be skipped):
         devShell = pkgs.mkShell {
-          inherit (self.checks.${system}.pre-commit-check) shellHook;
           nativeBuildInputs = with pkgs; [rustc cargo];
         };
       }
