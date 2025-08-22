@@ -3,4 +3,4 @@ pub mod nix;
 pub mod pypi;
 
 pub use github::GitHubClient;
-pub use pypi::{PyPiClient, PyPiReleaseFile};
+pub use pypi::PyPiClient;

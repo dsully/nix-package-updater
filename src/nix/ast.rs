@@ -7,8 +7,6 @@ use colored::Colorize;
 use indicatif::ProgressBar;
 use rnix::{Parse, Root, SyntaxKind, SyntaxNode};
 
-use crate::clients::PyPiReleaseFile;
-use crate::clients::nix::Nix;
 use crate::package::Package;
 
 #[derive(Debug)]
@@ -261,84 +259,6 @@ impl Ast {
         }
 
         blocks
-    }
-
-    /// Update platform hashes for PyPI packages
-    /// Returns (old_hash, new_hash) for the first platform updated, if any
-    pub fn update_pypi_hashes(&mut self, releases: &[PyPiReleaseFile], _source_type: &str) -> Result<Option<(String, String)>> {
-        // Check for platformData or dists structures
-        let platform_blocks = self.platforms();
-        let mut first_hash_change = None;
-
-        for block in platform_blocks {
-            if let Some(platform_value) = block.attributes.get("platform")
-                && let Some(old_hash) = block.attributes.get("hash")
-            {
-                // Find matching release
-                let mut url = None;
-
-                for wheel in releases {
-                    if wheel.filename.contains(platform_value) {
-                        url = Some(wheel.url.clone());
-                        break;
-                    }
-                }
-
-                if let Some(url) = url {
-                    if let Some(new_hash) = Nix::prefetch_hash(&url)? {
-                        // Update the hash in the AST
-                        self.set("hash", old_hash, &new_hash)?;
-
-                        // Track the first hash change for reporting
-                        if first_hash_change.is_none() {
-                            first_hash_change = Some((old_hash.clone(), new_hash));
-                        }
-                    } else {
-                        eprintln!("{}", format!("Failed to get hash for platform {}", block.platform_name).red());
-                    }
-                } else {
-                    eprintln!("{}", format!("No wheel found for platform {platform_value}").yellow());
-                }
-            }
-        }
-
-        Ok(first_hash_change)
-    }
-
-    /// Update platform hashes for GitHub packages
-    /// Returns (old_hash, new_hash) for the first platform updated, if any
-    pub fn update_github_hashes(&mut self, release_data: &serde_json::Value) -> Result<Option<(String, String)>> {
-        // Check for platformData structures
-        let platform_blocks = self.platforms();
-        let mut first_hash_change = None;
-
-        // Handle structured platform data
-        for block in platform_blocks {
-            if let Some(filename) = block.attributes.get("filename")
-                && let Some(old_hash) = block.attributes.get("hash")
-            {
-                let url = format!(
-                    "https://github.com/{}/releases/download/{}/{}",
-                    release_data["repo"].as_str().unwrap(),
-                    release_data["tag"].as_str().unwrap(),
-                    filename
-                );
-
-                // Get new hash
-                if let Some(new_hash) = Nix::prefetch_hash(&url)? {
-                    self.set("hash", old_hash, &new_hash)?;
-
-                    // Track the first hash change for reporting
-                    if first_hash_change.is_none() {
-                        first_hash_change = Some((old_hash.clone(), new_hash));
-                    }
-                } else {
-                    eprintln!("{}", format!("Failed to get hash for {filename}").red());
-                }
-            }
-        }
-
-        Ok(first_hash_change)
     }
 
     /// Update git revision and hash attributes
