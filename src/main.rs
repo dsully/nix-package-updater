@@ -155,7 +155,7 @@ fn main() -> Result<()> {
             };
         }
 
-        if package.result.status.contains(&UpdateStatus::Updated) || config.force {
+        if package.result.status.contains(&UpdateStatus::Updated) || config.force || config.build_only {
             let _ = build_package(package, &pb, &build_path, config.cache);
         }
 
