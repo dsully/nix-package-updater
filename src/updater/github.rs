@@ -52,7 +52,7 @@ impl Updater for GitHubRelease {
         let release_data = serde_json::json!({
             // Use release tag for hash generation
             "tag": latest_tag,
-            "repo": package.homepage.fullname,
+            "repo": package.homepage.path(),
         });
 
         // ast.update_github_hashes(&release_data)?;

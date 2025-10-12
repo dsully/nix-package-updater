@@ -1,4 +1,5 @@
 use anyhow::Result;
+use git_url_parse::types::provider::GenericProvider;
 use git_url_parse::GitUrl;
 use octocrab::Octocrab;
 
@@ -28,10 +29,9 @@ impl GitHubClient {
     }
 
     fn owner_and_repo_from_url(url: &GitUrl) -> Result<(String, String)> {
-        let owner = url.owner.clone().ok_or_else(|| anyhow::anyhow!("No owner found in URL: {url}"))?;
-        let repo = url.name.clone();
+        let provider: GenericProvider = url.provider_info()?;
 
-        Ok((owner, repo))
+        Ok((provider.owner().clone(), provider.repo().clone()))
     }
 
     pub fn latest_release(&self, url: &GitUrl) -> Result<Option<String>> {

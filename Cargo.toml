@@ -1,6 +1,6 @@
 [package]
 name = "nix-package-updater"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 homepage = "https://github.com/dsully/nix-package-updater"
 repository = "https://github.com/dsully/nix-package-updater"
@@ -16,10 +16,10 @@ clap_complete = "4.5"
 colored = "3"
 etcetera = "0.10.0"
 figment = { version = "0.10.19", features = ["env", "toml"] }
-git-url-parse = "0.4.5"
+git-url-parse = "0.6.0"
 indicatif = "0"
 itertools = "0.14.0"
-octocrab = "0.44"
+octocrab = "0.47"
 rayon = "1.11"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 rnix = "0.12"
@@ -114,6 +114,14 @@ zero_sized_map_values = "warn"
 [lints.rust]
 rust_2018_idioms = { level = "deny", priority = -1 }
 
+[profile.dev]
+debug = 1
+lto = "off"
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = true
@@ -123,11 +131,3 @@ incremental = true
 [profile.dist]
 inherits = "release"
 lto = "thin"
-
-[profile.dev]
-debug = 1
-lto = "off"
-incremental = true
-
-[profile.dev.package."*"]
-opt-level = 3
