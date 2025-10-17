@@ -98,7 +98,7 @@ impl Ast {
             }
         }
 
-        anyhow::bail!("Attribute '{}' with value '{}' not found", attr_name, old_value)
+        anyhow::bail!("Attribute '{attr_name}' with value '{old_value}' not found")
     }
 
     /// Get the current content

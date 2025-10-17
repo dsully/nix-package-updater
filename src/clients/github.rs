@@ -1,6 +1,6 @@
 use anyhow::Result;
-use git_url_parse::types::provider::GenericProvider;
 use git_url_parse::GitUrl;
+use git_url_parse::types::provider::GenericProvider;
 use octocrab::Octocrab;
 
 const DEFAULT_BRANCHES: [&str; 2] = ["main", "master"];

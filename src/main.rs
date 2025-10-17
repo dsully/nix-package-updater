@@ -28,6 +28,7 @@ use crate::updater::Updater;
 use crate::updater::cargo::Cargo;
 use crate::updater::git::GitRepository;
 use crate::updater::github::GitHubRelease;
+use crate::updater::npm::NpmUpdater;
 use crate::updater::pypi::PyPiUpdater;
 
 #[derive(Parser, Clone, Debug, Serialize, Deserialize)]
@@ -151,6 +152,7 @@ fn main() -> Result<()> {
                 PackageKind::PyPi => PyPiUpdater::new(&config).and_then(|u| u.update(package, Some(&pb))),
                 PackageKind::GitHub => GitHubRelease::new(&config).and_then(|u| u.update(package, Some(&pb))),
                 PackageKind::Cargo => Cargo::new(&config).and_then(|u| u.update(package, Some(&pb))),
+                PackageKind::Npm => NpmUpdater::new(&config).and_then(|u| u.update(package, Some(&pb))),
                 PackageKind::Git => GitRepository::new(&config).and_then(|u| u.update(package, Some(&pb))),
             };
         }

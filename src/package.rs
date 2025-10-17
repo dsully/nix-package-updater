@@ -17,6 +17,7 @@ pub enum PackageKind {
     PyPi,
     GitHub,
     Cargo,
+    Npm,
     Git,
 }
 
@@ -67,6 +68,8 @@ impl Package {
                         PackageKind::PyPi
                     } else if Ast::contains_function_call(&root, "rustPlatform.buildRustPackage") {
                         PackageKind::Cargo
+                    } else if Ast::contains_function_call(&root, "buildNpmPackage") {
+                        PackageKind::Npm
                     } else if content.contains("github.com") && content.contains("releases") && content.contains("download") {
                         PackageKind::GitHub
                     } else {

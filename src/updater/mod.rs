@@ -1,6 +1,7 @@
 pub mod cargo;
 pub mod git;
 pub mod github;
+pub mod npm;
 pub mod pypi;
 
 use anyhow::Result;
