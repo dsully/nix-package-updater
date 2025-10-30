@@ -1,6 +1,6 @@
 [package]
 name = "nix-package-updater"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2024"
 homepage = "https://github.com/dsully/nix-package-updater"
 repository = "https://github.com/dsully/nix-package-updater"
@@ -14,7 +14,7 @@ anyhow = "1.0"
 clap = { version = "4.5", features = ["color", "derive"] }
 clap_complete = "4.5"
 colored = "3"
-etcetera = "0.10.0"
+etcetera = "0.11.0"
 figment = { version = "0.10.19", features = ["env", "toml"] }
 git-url-parse = "0.6.0"
 indicatif = "0"
@@ -100,7 +100,6 @@ single_match_else = "warn"
 string_add = "warn"
 string_add_assign = "warn"
 string_lit_as_bytes = "warn"
-string_to_string = "warn"
 struct_excessive_bools = "allow"
 style = { level = "deny", priority = -1 }
 suspicious = { level = "deny", priority = -1 }
