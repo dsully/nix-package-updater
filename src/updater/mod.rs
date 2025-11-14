@@ -1,6 +1,7 @@
 pub mod cargo;
 pub mod git;
 pub mod github;
+pub mod go;
 pub mod npm;
 pub mod pypi;
 

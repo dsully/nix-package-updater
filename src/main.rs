@@ -28,6 +28,7 @@ use crate::updater::Updater;
 use crate::updater::cargo::Cargo;
 use crate::updater::git::GitRepository;
 use crate::updater::github::GitHubRelease;
+use crate::updater::go::GoUpdater;
 use crate::updater::npm::NpmUpdater;
 use crate::updater::pypi::PyPiUpdater;
 
@@ -153,6 +154,7 @@ fn main() -> Result<()> {
                 PackageKind::GitHub => GitHubRelease::new(&config).and_then(|u| u.update(package, Some(&pb))),
                 PackageKind::Cargo => Cargo::new(&config).and_then(|u| u.update(package, Some(&pb))),
                 PackageKind::Npm => NpmUpdater::new(&config).and_then(|u| u.update(package, Some(&pb))),
+                PackageKind::Go => GoUpdater::new(&config).and_then(|u| u.update(package, Some(&pb))),
                 PackageKind::Git => GitRepository::new(&config).and_then(|u| u.update(package, Some(&pb))),
             };
         }

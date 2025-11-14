@@ -18,6 +18,7 @@ pub enum PackageKind {
     GitHub,
     Cargo,
     Npm,
+    Go,
     Git,
 }
 
@@ -70,6 +71,8 @@ impl Package {
                         PackageKind::Cargo
                     } else if Ast::contains_function_call(&root, "buildNpmPackage") {
                         PackageKind::Npm
+                    } else if Ast::contains_function_call(&root, "buildGoModule") {
+                        PackageKind::Go
                     } else if content.contains("github.com") && content.contains("releases") && content.contains("download") {
                         PackageKind::GitHub
                     } else {
