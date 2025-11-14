@@ -48,4 +48,21 @@ impl Nix {
 
         Ok(None)
     }
+
+    pub fn prefetch_fetchcrate(pname: &str, version: &str) -> Result<Option<String>> {
+        let crate_url = format!("https://crates.io/crates/{pname}");
+        let output = Command::new("nurl").args(["--json", "--fetcher", "fetchCrate", &crate_url, version]).output()?;
+
+        if output.status.success() {
+            return match String::from_utf8_lossy(&output.stdout).trim_end().lines().last() {
+                Some(last_line) if !last_line.is_empty() => {
+                    let result: NurlResult = serde_json::from_str(last_line)?;
+                    Ok(Some(result.args.hash))
+                }
+                _ => Ok(None),
+            };
+        }
+
+        Ok(None)
+    }
 }
