@@ -26,3 +26,11 @@ pub fn short_hash(hash: impl AsRef<str>) -> String {
 
     hash.strip_prefix("sha256-").unwrap_or(hash).chars().take(8).collect()
 }
+
+/// Compare two semantic versions, returns true if a > b
+pub fn version_is_greater(a: &str, b: &str) -> bool {
+    match (semver::Version::parse(a), semver::Version::parse(b)) {
+        (Ok(va), Ok(vb)) => va > vb,
+        _ => a > b, // Fall back to string comparison if parsing fails
+    }
+}

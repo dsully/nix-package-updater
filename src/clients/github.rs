@@ -2,8 +2,19 @@ use git_url_parse::GitUrl;
 use git_url_parse::types::provider::GenericProvider;
 use octocrab::Octocrab;
 use rootcause::Result;
+use serde::Deserialize;
 
 const DEFAULT_BRANCHES: [&str; 2] = ["main", "master"];
+
+#[derive(Debug, Deserialize)]
+struct CargoToml {
+    package: CargoPackage,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoPackage {
+    version: String,
+}
 
 pub struct GitHubClient {
     client: Octocrab,
@@ -101,6 +112,34 @@ impl GitHubClient {
                     }
                 }
                 Ok(None)
+            }
+        })
+    }
+
+    /// Get version from Cargo.toml at a specific commit
+    pub fn cargo_version(&self, url: &GitUrl, commit: &str) -> Result<Option<String>> {
+        let (owner, repo) = Self::owner_and_repo_from_url(url)?;
+
+        self.runtime.block_on(async {
+            match self
+                .client
+                .repos(&owner, &repo)
+                .get_content()
+                .path("Cargo.toml")
+                .r#ref(commit)
+                .send()
+                .await
+            {
+                Ok(content) => {
+                    if let Some(item) = content.items.first()
+                        && let Some(decoded) = item.decoded_content()
+                        && let Ok(cargo_toml) = toml::from_str::<CargoToml>(&decoded)
+                    {
+                        return Ok(Some(cargo_toml.package.version));
+                    }
+                    Ok(None)
+                }
+                Err(_) => Ok(None),
             }
         })
     }

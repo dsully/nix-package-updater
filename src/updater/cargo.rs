@@ -6,7 +6,7 @@ use crate::clients::nix::Nix;
 use crate::clients::{CratesIoClient, GitHubClient};
 use crate::nix::ast::Ast;
 use crate::package::Package;
-use crate::updater::{Updater, short_hash};
+use crate::updater::{Updater, short_hash, version_is_greater};
 
 pub struct Cargo {
     force: bool,
@@ -111,8 +111,44 @@ impl Cargo {
         // Update rev and hash
         ast.update_git(Some(&current_git_commit), &latest_git_commit, &new_hash, None)?;
 
-        // Update version if we have a new one (using the commit as version for git packages)
-        let latest_version = short_hash(&latest_git_commit);
+        // Get version from multiple sources and use the highest one
+        let release_version = self
+            .github_client
+            .latest_release(&package.homepage)
+            .ok()
+            .flatten()
+            .map(|tag| tag.trim_start_matches('v').to_string());
+
+        let cargo_version = self
+            .github_client
+            .cargo_version(&package.homepage, &latest_git_commit)
+            .ok()
+            .flatten();
+
+        // Pick the higher version, or fall back to short hash for non-semantic packages
+        let latest_version = match (&release_version, &cargo_version) {
+            (Some(rel), Some(cargo)) => {
+                // Compare versions - pick higher one
+                if version_is_greater(cargo, rel) {
+                    cargo.clone()
+                } else {
+                    rel.clone()
+                }
+            }
+            (Some(rel), None) => rel.clone(),
+            (None, Some(cargo)) => cargo.clone(),
+            (None, None) => {
+                // No version source found - only use short hash if current version is hash-like
+                let is_semantic_version =
+                    package.version.contains('.') && package.version.chars().any(|c| c.is_ascii_digit());
+
+                if is_semantic_version {
+                    package.version.clone()
+                } else {
+                    short_hash(&latest_git_commit)
+                }
+            }
+        };
 
         if package.version != latest_version {
             ast.set("version", &package.version, &latest_version)?;
@@ -125,8 +161,13 @@ impl Cargo {
 
         package
             .result
-            .git_commit(Some(current_git_commit.as_ref()), Some(latest_git_commit.as_ref()))
-            .version(Some(package.version.as_ref()), Some(latest_version.as_ref()));
+            .git_commit(Some(current_git_commit.as_ref()), Some(latest_git_commit.as_ref()));
+
+        if package.version != latest_version {
+            package
+                .result
+                .version(Some(package.version.as_ref()), Some(latest_version.as_ref()));
+        }
 
         Ok(())
     }
