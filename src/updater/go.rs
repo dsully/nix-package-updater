@@ -1,5 +1,5 @@
-use anyhow::Result;
 use indicatif::ProgressBar;
+use rootcause::Result;
 
 use crate::Config;
 use crate::clients::GitHubClient;
@@ -8,14 +8,14 @@ use crate::package::Package;
 use crate::updater::Updater;
 
 pub struct GoUpdater {
-    pub config: Config,
-    pub github_client: GitHubClient,
+    force: bool,
+    github_client: GitHubClient,
 }
 
 impl Updater for GoUpdater {
     fn new(config: &Config) -> Result<Self> {
         Ok(Self {
-            config: config.clone(),
+            force: config.force,
             github_client: GitHubClient::new()?,
         })
     }
@@ -23,14 +23,11 @@ impl Updater for GoUpdater {
     fn update(&self, package: &mut Package, pb: Option<&ProgressBar>) -> Result<()> {
         let ast_tmp = package.ast();
 
-        // Get current git commit (rev) if it exists
         let current_git_commit = ast_tmp.get("rev");
-
-        // Try to get latest commit from GitHub
         let latest_git_commit = self.github_client.latest_commit(&package.homepage)?;
 
         if let (Some(current), Some(latest)) = (&current_git_commit, &latest_git_commit)
-            && self.should_skip_update(self.config.force, current, latest)
+            && self.should_skip_update(self.force, current, latest)
         {
             package.result.up_to_date();
             return Ok(());
@@ -53,11 +50,7 @@ impl Updater for GoUpdater {
         // Update rev and hash (version is updated automatically if it contains the old rev)
         ast.update_git(current_git_commit.as_deref(), &latest_commit, &new_hash, None)?;
 
-        // Clear vendorHash to force recalculation
-        if let Some(old_vendor_hash) = ast.get("vendorHash") {
-            ast.set("vendorHash", &old_vendor_hash, "")?;
-        }
-
+        ast.clear_vendor_hash("vendor")?;
         ast.update_vendor(package, "vendor", pb)?;
 
         package.write(&ast)?;

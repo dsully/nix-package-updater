@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::Result;
 use indicatif::ProgressBar;
+use rootcause::Result;
 use whoami::username;
 
 use crate::package::{Package, UpdateStatus};
@@ -33,18 +33,18 @@ pub fn build_package(package: &mut Package, pb: &ProgressBar, build_path: &Path,
 }
 
 pub fn push_to_cachix(package: &mut Package, pb: &ProgressBar) -> Result<()> {
-    //
     pb.set_message(format!("{}: Pushing to cachix ...", package.name()));
 
     let output = Command::new("nix").args(["path-info", &format!(".#{}", package.name)]).output()?;
 
     if output.status.success() {
+        let user = username()?;
         let paths = String::from_utf8_lossy(&output.stdout);
 
         for path in paths.lines() {
             if !path.is_empty() {
                 Command::new("cachix")
-                    .args(["push", "--compression-method", "xz", "--compression-level", "6", &username(), path])
+                    .args(["push", "--compression-method", "xz", "--compression-level", "6", &user, path])
                     .output()?;
 
                 package.result.status.insert(UpdateStatus::Cached);

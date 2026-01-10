@@ -10,7 +10,6 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::{fs, io};
 
-use anyhow::Result;
 use clap::{CommandFactory, Parser};
 use clap_complete::{Shell, generate};
 use colored::Colorize;
@@ -20,7 +19,16 @@ use figment::providers::{Env, Format, Serialized, Toml};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use rayon::prelude::*;
+use rootcause::hooks::Hooks;
+use rootcause::{Result, report};
+use rootcause_backtrace::BacktraceCollector;
+use rootcause_tracing::{RootcauseLayer, SpanCollector};
 use serde::{Deserialize, Serialize};
+use tracing::{error, info, warn};
+use tracing_indicatif::IndicatifLayer;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::nix::builder::build_package;
 use crate::package::{Package, PackageKind, UpdateStatus};
@@ -100,40 +108,41 @@ struct Config {
     completions: Option<String>,
 }
 
-fn main() -> Result<()> {
-    let strategy = choose_base_strategy().expect("Unable to find base strategy");
-    let path = strategy.config_dir().join("nix-updater").join("config.toml");
+fn init_tracing(verbose: bool) {
+    let indicatif_layer = IndicatifLayer::new();
 
-    let config: Config = Figment::new()
-        .merge(Serialized::defaults(Config::parse()))
-        .merge(Toml::file(path))
-        .merge(Env::prefixed("NIX_UPDATER_").split("_"))
-        .extract()?;
+    let filter = if verbose {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"))
+    } else {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"))
+    };
 
-    // Handle completions subcommand
-    if let Some(shell) = config.completions {
-        let mut cmd = Config::command();
-        let name = &cmd.get_name().to_string();
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(RootcauseLayer)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .without_time()
+                .with_target(false)
+                .with_writer(indicatif_layer.get_stderr_writer()),
+        )
+        .with(indicatif_layer)
+        .init();
 
-        eprintln!("Generating completion file for {shell}...");
+    let _ = Hooks::new()
+        .report_creation_hook(SpanCollector::new())
+        .report_creation_hook(BacktraceCollector::new_from_env())
+        .install();
+}
 
-        generate(Shell::from_str(&shell).expect("Invalid shell!"), &mut cmd, name, &mut io::stdout());
-
-        return Ok(());
-    }
-
-    let mut packages = ["packages/", "nix/packages/"]
+fn discover_packages(config: &Config) -> Vec<Package> {
+    ["packages/", "nix/packages/"]
         .iter()
         .flat_map(|&path| Package::discover(Path::new(path), &config.packages, &config.exclude))
-        .collect_vec();
+        .collect_vec()
+}
 
-    if packages.is_empty() {
-        println!("{}", "No packages found to process".yellow());
-        return Ok(());
-    }
-
-    let build_path = PathBuf::from("build-results");
-
+fn process_packages(packages: &mut [Package], config: &Config, build_path: &Path) {
     let multi = MultiProgress::new();
 
     let style = ProgressStyle::with_template("{spinner:.cyan.bold} {msg}")
@@ -141,7 +150,6 @@ fn main() -> Result<()> {
         .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ");
 
     packages.par_iter_mut().for_each(|package| {
-        //
         let pb = multi.add(ProgressBar::new_spinner());
         pb.enable_steady_tick(Duration::from_millis(50));
         pb.set_style(style.clone());
@@ -149,28 +157,33 @@ fn main() -> Result<()> {
         if !config.build_only {
             pb.set_message(format!("{}: Checking for version updates ...", package.name()));
 
-            let _ = match package.kind {
-                PackageKind::PyPi => PyPiUpdater::new(&config).and_then(|u| u.update(package, Some(&pb))),
-                PackageKind::GitHub => GitHubRelease::new(&config).and_then(|u| u.update(package, Some(&pb))),
-                PackageKind::Cargo => Cargo::new(&config).and_then(|u| u.update(package, Some(&pb))),
-                PackageKind::Npm => NpmUpdater::new(&config).and_then(|u| u.update(package, Some(&pb))),
-                PackageKind::Go => GoUpdater::new(&config).and_then(|u| u.update(package, Some(&pb))),
-                PackageKind::Git => GitRepository::new(&config).and_then(|u| u.update(package, Some(&pb))),
+            let update_result = match package.kind {
+                PackageKind::PyPi => PyPiUpdater::new(config).and_then(|u| u.update(package, Some(&pb))),
+                PackageKind::GitHub => GitHubRelease::new(config).and_then(|u| u.update(package, Some(&pb))),
+                PackageKind::Cargo => Cargo::new(config).and_then(|u| u.update(package, Some(&pb))),
+                PackageKind::Npm => NpmUpdater::new(config).and_then(|u| u.update(package, Some(&pb))),
+                PackageKind::Go => GoUpdater::new(config).and_then(|u| u.update(package, Some(&pb))),
+                PackageKind::Git => GitRepository::new(config).and_then(|u| u.update(package, Some(&pb))),
             };
+
+            if let Err(e) = update_result {
+                pb.suspend(|| error!(package = %package.name, "Update failed: {e}"));
+                package.result.failed(format!("Update error: {e}"));
+            }
         }
 
-        if package.result.status.contains(&UpdateStatus::Updated) || config.force || config.build_only {
-            let _ = build_package(package, &pb, &build_path, config.cache);
+        if (package.result.status.contains(&UpdateStatus::Updated) || config.force || config.build_only)
+            && let Err(e) = build_package(package, &pb, build_path, config.cache)
+        {
+            pb.suspend(|| error!(package = %package.name, "Build failed: {e}"));
+            package.result.failed(format!("Build error: {e}"));
         }
 
         pb.finish_and_clear();
     });
+}
 
-    if packages.iter().all(|p| p.result.status.contains(&UpdateStatus::UpToDate)) {
-        println!("{}", "No packages needed updating.".yellow());
-        return Ok(());
-    }
-
+fn print_results(packages: &[Package]) {
     println!(
         "{:<30} {:<8} {:<8} {:<8} {:<8} Details",
         "Package".bright_white().bold(),
@@ -199,7 +212,6 @@ fn main() -> Result<()> {
 
             println!(
                 "{} {:<8} {:<8} {:<8} {:<8} {}",
-                // Pad the package name to account for the OSC-8 codes.
                 format_args!("{}{}", package.name(), " ".repeat(30 - package.display_width())),
                 package.kind.to_string().magenta(),
                 package.result.status(UpdateStatus::Updated),
@@ -208,9 +220,55 @@ fn main() -> Result<()> {
                 details.join("\n")
             );
         });
+}
 
-    if packages.iter().all(|p| p.result.status.contains(&UpdateStatus::Built)) {
-        fs::remove_dir_all(&build_path).expect("Failed to remove build directory");
+fn main() -> Result<()> {
+    let strategy = choose_base_strategy().expect("Unable to find base strategy");
+    let path = strategy.config_dir().join("nix-updater").join("config.toml");
+
+    let config: Config = Figment::new()
+        .merge(Serialized::defaults(Config::parse()))
+        .merge(Toml::file(path))
+        .merge(Env::prefixed("NIX_UPDATER_").split("_"))
+        .extract()?;
+
+    init_tracing(config.verbose);
+
+    if let Some(shell) = config.completions {
+        let mut cmd = Config::command();
+        let name = &cmd.get_name().to_string();
+
+        info!("Generating completion file for {shell}...");
+
+        let shell_type = Shell::from_str(&shell).map_err(|_| report!("Invalid shell: {shell}. Valid shells: bash, zsh, fish, elvish, powershell"))?;
+
+        generate(shell_type, &mut cmd, name, &mut io::stdout());
+
+        return Ok(());
+    }
+
+    let mut packages = discover_packages(&config);
+
+    if packages.is_empty() {
+        println!("{}", "No packages found to process".yellow());
+        return Ok(());
+    }
+
+    let build_path = PathBuf::from("build-results");
+
+    process_packages(&mut packages, &config, &build_path);
+
+    if packages.iter().all(|p| p.result.status.contains(&UpdateStatus::UpToDate)) {
+        println!("{}", "No packages needed updating.".yellow());
+        return Ok(());
+    }
+
+    print_results(&packages);
+
+    if packages.iter().all(|p| p.result.status.contains(&UpdateStatus::Built))
+        && let Err(e) = fs::remove_dir_all(&build_path)
+    {
+        warn!("Failed to remove build directory: {e}");
     }
 
     Ok(())

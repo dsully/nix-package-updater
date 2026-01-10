@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
 
-use anyhow::Result;
-use colored::Colorize;
 use indicatif::ProgressBar;
 use rnix::{Parse, Root, SyntaxKind, SyntaxNode};
+use rootcause::{Result, bail};
+use tracing::info;
 
 use crate::package::Package;
 
@@ -98,7 +98,7 @@ impl Ast {
             }
         }
 
-        anyhow::bail!("Attribute '{attr_name}' with value '{old_value}' not found")
+        bail!("Attribute '{attr_name}' with value '{old_value}' not found")
     }
 
     /// Get the current content
@@ -288,13 +288,22 @@ impl Ast {
         Ok(())
     }
 
+    /// Clear a vendor hash (cargoHash, vendorHash, npmDepsHash) to force recalculation
+    pub fn clear_vendor_hash(&mut self, hash_type: &str) -> Result<()> {
+        let attr_name = format!("{hash_type}Hash");
+        if let Some(old_hash) = self.get(&attr_name) {
+            self.set(&attr_name, &old_hash, "")?;
+        }
+        Ok(())
+    }
+
     /// Update vendor hash by building the package and extracting the hash from error output
     pub fn update_vendor(&mut self, package: &Package, hash_type: &str, pb: Option<&ProgressBar>) -> Result<()> {
         //
         if let Some(pb) = pb {
             pb.set_message(format!("{}: Building to get new {hash_type}Hash...", package.name()));
         } else {
-            println!("{}", format!("{}: Building to get new {hash_type}Hash...", package.name()).yellow());
+            info!(package = %package.name, hash_type, "Building to get new hash");
         }
 
         // Write out the current content so "nix build" can work with the latest changes

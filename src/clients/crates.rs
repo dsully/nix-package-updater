@@ -1,5 +1,5 @@
-use anyhow::Result;
 use reqwest::blocking::Client;
+use rootcause::{Result, bail};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -37,10 +37,10 @@ impl CratesIoClient {
                 } else if response.status().as_u16() == 404 {
                     Ok(None)
                 } else {
-                    anyhow::bail!("crates.io API returned status: {}", response.status())
+                    bail!("crates.io API returned status: {}", response.status())
                 }
             }
-            Err(e) => anyhow::bail!("Failed to fetch crates.io data: {e}"),
+            Err(e) => bail!("Failed to fetch crates.io data: {e}"),
         }
     }
 }

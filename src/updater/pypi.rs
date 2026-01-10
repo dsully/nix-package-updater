@@ -1,5 +1,5 @@
-use anyhow::Result;
 use indicatif::ProgressBar;
+use rootcause::Result;
 
 use crate::Config;
 use crate::clients::PyPiClient;
@@ -8,21 +8,19 @@ use crate::package::Package;
 use crate::updater::Updater;
 
 pub struct PyPiUpdater {
-    pub config: Config,
-    pub client: PyPiClient,
+    force: bool,
+    client: PyPiClient,
 }
 
 impl Updater for PyPiUpdater {
     fn new(config: &Config) -> Result<Self> {
         Ok(Self {
-            config: config.clone(),
-            client: PyPiClient::new(),
+            force: config.force,
+            client: PyPiClient::new()?,
         })
     }
 
     fn update(&self, package: &mut Package, _pb: Option<&ProgressBar>) -> Result<()> {
-        //
-        // Get latest version from PyPI using the client
         let Some(data) = self.client.project(&package.name)? else {
             package.result.failed(format!("{}: Package not found on PyPI", package.name()));
             return Ok(());
@@ -30,7 +28,7 @@ impl Updater for PyPiUpdater {
 
         let latest_version = data.info.version;
 
-        if self.should_skip_update(self.config.force, &package.version, &latest_version) {
+        if self.should_skip_update(self.force, &package.version, &latest_version) {
             package.result.up_to_date();
             return Ok(());
         }

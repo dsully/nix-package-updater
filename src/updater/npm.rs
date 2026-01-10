@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::Path;
 
-use anyhow::Result;
 use indicatif::ProgressBar;
+use rootcause::{Result, report};
 
 use crate::Config;
 use crate::clients::nix::Nix;
@@ -11,16 +11,16 @@ use crate::package::Package;
 use crate::updater::{Updater, short_hash};
 
 pub struct NpmUpdater {
-    pub config: Config,
-    pub npm_client: NpmClient,
-    pub github_client: GitHubClient,
+    force: bool,
+    npm_client: NpmClient,
+    github_client: GitHubClient,
 }
 
 impl Updater for NpmUpdater {
     fn new(config: &Config) -> Result<Self> {
         Ok(Self {
-            config: config.clone(),
-            npm_client: NpmClient::new(),
+            force: config.force,
+            npm_client: NpmClient::new()?,
             github_client: GitHubClient::new()?,
         })
     }
@@ -28,14 +28,11 @@ impl Updater for NpmUpdater {
     fn update(&self, package: &mut Package, pb: Option<&ProgressBar>) -> Result<()> {
         let ast_tmp = package.ast();
 
-        // Get current git commit (rev) if it exists
         let current_git_commit = ast_tmp.get("rev");
-
-        // Try to get latest commit from GitHub
         let latest_git_commit = self.github_client.latest_commit(&package.homepage)?;
 
         if let (Some(current), Some(latest)) = (&current_git_commit, &latest_git_commit)
-            && self.should_skip_update(self.config.force, current, latest)
+            && self.should_skip_update(self.force, current, latest)
         {
             package.result.up_to_date();
             return Ok(());
@@ -82,12 +79,7 @@ impl Updater for NpmUpdater {
             ast.set("version", &package.version, &new_version)?;
         }
 
-        // Clear npmDepsHash to force recalculation
-        if let Some(old_npm_hash) = ast.get("npmDepsHash") {
-            ast.set("npmDepsHash", &old_npm_hash, "")?;
-        }
-
-        // Update npmDepsHash using the vendor hash update mechanism
+        ast.clear_vendor_hash("npmDeps")?;
         ast.update_vendor(package, "npmDeps", pb)?;
 
         package.write(&ast)?;
@@ -105,7 +97,7 @@ impl Updater for NpmUpdater {
 fn save_package_lock(nix_path: &Path, content: &str) -> Result<()> {
     let package_lock_path = nix_path
         .parent()
-        .ok_or_else(|| anyhow::anyhow!("Could not get parent directory of Nix file"))?
+        .ok_or_else(|| report!("Could not get parent directory of Nix file"))?
         .join("package-lock.json");
 
     fs::write(&package_lock_path, content)?;

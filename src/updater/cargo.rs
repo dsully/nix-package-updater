@@ -1,5 +1,5 @@
-use anyhow::Result;
 use indicatif::ProgressBar;
+use rootcause::Result;
 
 use crate::Config;
 use crate::clients::nix::Nix;
@@ -9,15 +9,15 @@ use crate::package::Package;
 use crate::updater::{Updater, short_hash};
 
 pub struct Cargo {
-    pub config: Config,
-    pub github_client: GitHubClient,
-    pub crates_client: CratesIoClient,
+    force: bool,
+    github_client: GitHubClient,
+    crates_client: CratesIoClient,
 }
 
 impl Updater for Cargo {
     fn new(config: &Config) -> Result<Self> {
         Ok(Self {
-            config: config.clone(),
+            force: config.force,
             github_client: GitHubClient::new()?,
             crates_client: CratesIoClient::new()?,
         })
@@ -48,7 +48,7 @@ impl Cargo {
         let latest_version = &crate_info.crate_data.max_version;
 
         // Skip if already up to date
-        if self.should_skip_update(self.config.force, &package.version, latest_version) {
+        if self.should_skip_update(self.force, &package.version, latest_version) {
             package.result.up_to_date();
             return Ok(());
         }
@@ -69,12 +69,7 @@ impl Cargo {
             ast.set("hash", &old_hash, &new_hash)?;
         }
 
-        // Clear cargoHash by finding the current value and replacing with empty string
-        if let Some(old_cargo_hash) = ast.get("cargoHash") {
-            ast.set("cargoHash", &old_cargo_hash, "")?;
-        }
-
-        // Update cargoHash
+        ast.clear_vendor_hash("cargo")?;
         ast.update_vendor(package, "cargo", pb)?;
 
         package.write(&ast)?;
@@ -100,7 +95,7 @@ impl Cargo {
             return Ok(());
         };
 
-        if self.should_skip_update(self.config.force, &current_git_commit, &latest_git_commit) {
+        if self.should_skip_update(self.force, &current_git_commit, &latest_git_commit) {
             package.result.up_to_date();
             return Ok(());
         }
@@ -123,12 +118,7 @@ impl Cargo {
             ast.set("version", &package.version, &latest_version)?;
         }
 
-        // Clear cargoHash by finding the current value and replacing with empty string
-        if let Some(old_cargo_hash) = ast.get("cargoHash") {
-            ast.set("cargoHash", &old_cargo_hash, "")?;
-        }
-
-        // Update cargoHash
+        ast.clear_vendor_hash("cargo")?;
         ast.update_vendor(package, "cargo", pb)?;
 
         package.write(&ast)?;

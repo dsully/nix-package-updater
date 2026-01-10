@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use anyhow::Result;
+use rootcause::Result;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

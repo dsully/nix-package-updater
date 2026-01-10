@@ -5,8 +5,8 @@ pub mod go;
 pub mod npm;
 pub mod pypi;
 
-use anyhow::Result;
 use indicatif::ProgressBar;
+use rootcause::Result;
 
 use crate::Config;
 use crate::package::Package;

@@ -2,11 +2,12 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
 use colored::{ColoredString, Colorize};
 use git_url_parse::GitUrl;
 use rnix::{Parse, Root};
+use rootcause::Result;
 use strum::Display;
+use tracing::warn;
 use walkdir::WalkDir;
 
 use crate::nix::ast::Ast;
@@ -41,65 +42,87 @@ impl Package {
 
         for entry in WalkDir::new(root)
             .into_iter()
-            .filter_map(Result::ok)
+            .filter_map(std::result::Result::ok)
             .filter(|e| e.path().extension().is_some_and(|ext| ext == "nix") && e.file_type().is_file())
         {
             let path = entry.path();
 
-            if let Ok(content) = fs::read_to_string(path) {
-                //
-                let ast = rnix::Root::parse(&content);
-                let root = ast.syntax();
+            let Ok(content) = fs::read_to_string(path) else {
+                warn!(path = %path.display(), "Could not read file");
+                continue;
+            };
 
-                let updater = Ast::from_ast(ast.clone());
-                if let Some(pname) = updater.get("pname") {
-                    //
-                    // Apply package filter if specified
-                    if !include.is_empty() && !include.iter().any(|pkg| pname.contains(pkg)) {
-                        continue;
-                    }
+            let ast = rnix::Root::parse(&content);
+            let root_syntax = ast.syntax();
 
-                    // Skip excluded packages
-                    if exclude.iter().any(|e| e == &pname) {
-                        continue;
-                    }
+            let updater = Ast::from_ast(ast.clone());
 
-                    // Determine package type by checking content
-                    let package_type = if Ast::contains_function_call(&root, "fetchPypi") {
-                        PackageKind::PyPi
-                    } else if Ast::contains_function_call(&root, "rustPlatform.buildRustPackage") {
-                        PackageKind::Cargo
-                    } else if Ast::contains_function_call(&root, "buildNpmPackage") {
-                        PackageKind::Npm
-                    } else if Ast::contains_function_call(&root, "buildGoModule") {
-                        PackageKind::Go
-                    } else if content.contains("github.com") && content.contains("releases") && content.contains("download") {
-                        PackageKind::GitHub
-                    } else {
-                        PackageKind::Git
-                    };
+            let Some(pname) = updater.get("pname") else {
+                continue;
+            };
 
-                    let homepage = updater
-                        .get("homepage")
-                        .unwrap_or_else(|| panic!("Failed to find 'homepage' attribute in: {}", path.display()));
-
-                    packages.push(Self {
-                        name: pname,
-                        path: path.to_path_buf(),
-                        kind: package_type,
-                        homepage: GitUrl::parse(&homepage).expect("Failed to parse homepage URL"),
-                        nix_hash: updater.get("hash").unwrap_or_else(|| panic!("Failed to find 'hash' attribute in: {}", path.display())),
-                        version: updater
-                            .get("version")
-                            .unwrap_or_else(|| panic!("Failed to find 'version' attribute in: {}", path.display())),
-                        ast: ast.clone(),
-                        result: UpdateResult::default(),
-                    });
-                }
+            // Apply package filter if specified
+            if !include.is_empty() && !include.iter().any(|pkg| pname.contains(pkg)) {
+                continue;
             }
+
+            // Skip excluded packages
+            if exclude.iter().any(|e| e == &pname) {
+                continue;
+            }
+
+            // Determine package type by checking content
+            let package_type = Self::detect_package_kind(&root_syntax, &content);
+
+            let Some(homepage_str) = updater.get("homepage") else {
+                warn!(package = %pname, "Skipping: missing 'homepage' attribute");
+                continue;
+            };
+
+            let Ok(homepage) = GitUrl::parse(&homepage_str) else {
+                warn!(package = %pname, url = %homepage_str, "Skipping: invalid homepage URL");
+                continue;
+            };
+
+            let Some(nix_hash) = updater.get("hash") else {
+                warn!(package = %pname, "Skipping: missing 'hash' attribute");
+                continue;
+            };
+
+            let Some(version) = updater.get("version") else {
+                warn!(package = %pname, "Skipping: missing 'version' attribute");
+                continue;
+            };
+
+            packages.push(Self {
+                name: pname,
+                path: path.to_path_buf(),
+                kind: package_type,
+                homepage,
+                nix_hash,
+                version,
+                ast: ast.clone(),
+                result: UpdateResult::default(),
+            });
         }
 
         packages
+    }
+
+    fn detect_package_kind(root: &rnix::SyntaxNode, content: &str) -> PackageKind {
+        if Ast::contains_function_call(root, "fetchPypi") {
+            PackageKind::PyPi
+        } else if Ast::contains_function_call(root, "rustPlatform.buildRustPackage") {
+            PackageKind::Cargo
+        } else if Ast::contains_function_call(root, "buildNpmPackage") {
+            PackageKind::Npm
+        } else if Ast::contains_function_call(root, "buildGoModule") {
+            PackageKind::Go
+        } else if content.contains("github.com") && content.contains("releases") && content.contains("download") {
+            PackageKind::GitHub
+        } else {
+            PackageKind::Git
+        }
     }
 
     /// Format the package name with hyperlink if homepage is available

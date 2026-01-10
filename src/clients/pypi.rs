@@ -1,5 +1,5 @@
-use anyhow::Result;
 use reqwest::blocking::Client;
+use rootcause::{Result, bail};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -24,14 +24,13 @@ pub struct PyPiClient {
 }
 
 impl PyPiClient {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .user_agent(format!("nix-updater/{}", env!("CARGO_PKG_VERSION")))
-                .build()
-                .expect("Couldn't build a client for PyPi"),
-        }
+                .build()?,
+        })
     }
 
     pub fn project(&self, name: &str) -> Result<Option<PyPiProjectResponse>> {
@@ -44,10 +43,10 @@ impl PyPiClient {
                 } else if response.status().as_u16() == 404 {
                     Ok(None)
                 } else {
-                    anyhow::bail!("PyPI API returned status: {}", response.status())
+                    bail!("PyPI API returned status: {}", response.status())
                 }
             }
-            Err(e) => anyhow::bail!("Failed to fetch PyPI data: {e}"),
+            Err(e) => bail!("Failed to fetch PyPI data: {e}"),
         }
     }
 }
