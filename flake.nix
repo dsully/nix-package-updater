@@ -1,55 +1,52 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-
-    naersk.url = "github:nix-community/naersk";
-    naersk.inputs.nixpkgs.follows = "nixpkgs";
-
-    rust-overlay.url = "github:oxalica/rust-overlay";
-    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    crane.url = "github:ipetkov/crane";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs = {
-    flake-utils,
-    naersk,
+    self,
     nixpkgs,
-    rust-overlay,
+    crane,
+    flake-utils,
     ...
   }:
-    flake-utils.lib.eachDefaultSystem (
-      system: let
-        overlays = [(import rust-overlay)];
+    flake-utils.lib.eachDefaultSystem (system: let
+      pkgs = nixpkgs.legacyPackages.${system};
+      craneLib = crane.mkLib pkgs;
 
-        pkgs = (import nixpkgs) {
-          inherit system overlays;
-        };
+      commonArgs = {
+        src = craneLib.cleanCargoSource ./.;
+        strictDeps = true;
+        pname = "nix-package-updater";
+      };
 
-        toolchain = pkgs.rust-bin.stable.latest.minimal;
+      cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-        naersk' = pkgs.callPackage naersk {
-          cargo = toolchain;
-          rustc = toolchain;
-        };
-      in rec {
-        # For `nix build` & `nix run`:
-        packages = {
-          default = naersk'.buildPackage {
-            pname = "nix-package-updater";
-            src = ./.;
-          };
+      package = craneLib.buildPackage (commonArgs // {inherit cargoArtifacts;});
 
-          clippy = naersk'.buildPackage {
-            src = ./.;
-            mode = "clippy";
-          };
-        };
+      clippy = craneLib.cargoClippy (commonArgs // {
+        inherit cargoArtifacts;
+        cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+      });
+    in {
+      packages = {
+        default = package;
+        inherit clippy;
+      };
 
-        defaultPackage = packages.default;
+      checks = {
+        inherit package clippy;
+      };
 
-        # For `nix develop` (optional, can be skipped):
-        devShell = pkgs.mkShell {
-          nativeBuildInputs = with pkgs; [rustc cargo];
-        };
-      }
-    );
+      devShells.default = craneLib.devShell {
+        packages = with pkgs; [
+          cargo
+          rustc
+          clippy
+          rustfmt
+        ];
+      };
+    });
 }
