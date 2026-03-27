@@ -4,100 +4,83 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a Rust CLI tool that automatically updates Nix package definitions from multiple sources (PyPI, GitHub releases, Cargo, Git repositories). It discovers Nix package files, checks for updates, applies changes to the Nix AST, builds packages to verify updates, and optionally pushes to cachix.
+Rust CLI tool that automatically updates Nix package definitions from multiple sources (PyPI, GitHub releases, Cargo, npm, Go, Git). It discovers Nix package files, checks for updates, applies changes to the Nix AST, builds packages to verify updates, and optionally pushes to cachix.
 
 ## Build & Development Commands
 
 ```bash
-# Build the project (creates ./result/bin/nix-package-updater)
-nix build
-
-# Build with clippy checks
-nix build .#clippy
-
-# Development shell
-nix develop
-
-# Run the binary (after building)
-./result/bin/nix-package-updater
-
-# Common development tasks (requires just)
-just fmt                    # Format Nix files (alejandra, deadnix, statix)
-just up                     # Update flake inputs
+nix build                  # Build (creates ./result/bin/nix-package-updater)
+nix build .#clippy         # Build with clippy checks (--deny warnings)
+nix develop                # Development shell (cargo, rustc, clippy, rustfmt)
 ```
 
-## Testing & Running
+The flake uses crane with a separated `buildDepsOnly`/`buildPackage` strategy for Nix store caching. There are currently no unit or integration tests.
+
+## Usage
 
 ```bash
-# Update all packages in packages/ or nix/packages/ directories
-./result/bin/nix-package-updater
-
-# Update specific packages only
-./result/bin/nix-package-updater package1 package2
-
-# Filter by package type
-./result/bin/nix-package-updater --type pypi
-
-# Build only, skip updates
-./result/bin/nix-package-updater --build-only
-
-# Force update even if up to date
-./result/bin/nix-package-updater --force
-
-# Push successful builds to cachix (uses whoami::username())
-./result/bin/nix-package-updater --cache
-
-# Dry run (show what would be updated)
-./result/bin/nix-package-updater --dry-run
-
-# Generate shell completions
-./result/bin/nix-package-updater completions bash
+./result/bin/nix-package-updater                    # Update all packages
+./result/bin/nix-package-updater package1 package2  # Update specific packages
+./result/bin/nix-package-updater --type pypi         # Filter by package type
+./result/bin/nix-package-updater --build-only        # Build only, skip updates
+./result/bin/nix-package-updater --force             # Force update even if up to date
+./result/bin/nix-package-updater --cache             # Push builds to cachix
+./result/bin/nix-package-updater --dry-run           # Show what would be updated
 ```
 
 ## Architecture
 
 ### Module Structure
 
-- **`main.rs`**: Entry point, CLI parsing (clap), config loading (figment from `~/.config/nix-updater/config.toml` + env vars), package discovery, parallel processing with rayon, progress bars with indicatif
-- **`package.rs`**: Core `Package` struct containing name, path, kind (PyPi/GitHub/Cargo/Git), homepage URL, version, hash, Nix AST, and update results. `Package::discover()` walks `packages/` and `nix/packages/` directories to find .nix files
-- **`nix/ast.rs`**: AST manipulation using rnix parser. `Ast` struct wraps parsed Nix code and provides methods to get/set attributes while maintaining parse tree integrity. Key methods: `get()`, `set()`, `platforms()`, `update_git()`, `update_vendor()`
-- **`nix/builder.rs`**: Builds packages with `nix build`, writes logs to `build-results/`, pushes to cachix using username from whoami
-- **`updater/`**: Trait-based updater system with implementations for each package source type
-- **`clients/`**: HTTP clients for external APIs (PyPI, GitHub, Nix)
+- **`main.rs`** — Entry point, CLI parsing (clap), config loading (figment), package discovery, parallel processing with rayon, progress bars with indicatif
+- **`package.rs`** — `Package` struct (name, path, kind, homepage, version, hash, AST, results) and `Package::discover()` which walks directories to find .nix files
+- **`nix/ast.rs`** — AST manipulation using rnix. `Ast` wraps parsed Nix code; key methods: `get()`, `set()`, `platforms()`, `update_git()`, `update_vendor()`
+- **`nix/builder.rs`** — Builds packages with `nix build`, writes logs to `build-results/`, pushes to cachix
+- **`updater/`** — Trait-based updater system with implementations per package source:
+  - `pypi.rs` — PyPI packages (handles platform-specific wheels)
+  - `github.rs` — GitHub release-based packages
+  - `cargo.rs` — Rust crates (both fetchCrate and git-based)
+  - `npm.rs` — npm packages (downloads package-lock.json, updates npmDepsHash)
+  - `go.rs` — Go modules (buildGoModule, updates vendorHash)
+  - `git.rs` — Generic git repository fallback
+- **`clients/`** — HTTP clients: `pypi.rs`, `github.rs` (octocrab with tokio async-to-sync wrapper), `crates.rs`, `npm.rs`, `nix.rs` (CLI wrapper for nix/nurl commands)
+
+### Updater Trait
+
+The core extension point — each package type implements:
+
+```rust
+pub trait Updater: Sized {
+    fn new(config: &Config) -> Result<Self>;
+    fn update(&self, package: &mut Package, pb: Option<&ProgressBar>) -> Result<()>;
+    fn should_skip_update(&self, force: bool, current: &str, latest: &str) -> bool;
+}
+```
 
 ### Package Type Detection
 
-Package types are detected in `Package::discover()` by analyzing Nix AST and content:
-- **PyPi**: Looks for `fetchPypi` function call
-- **Cargo**: Looks for `rustPlatform.buildRustPackage` function call
-- **GitHub**: Checks for "github.com", "releases", "download" in content
-- **Git**: Default fallback for other packages
+`Package::detect_package_kind()` checks the Nix AST for function calls:
+- **PyPi**: `fetchPypi`
+- **Cargo**: `rustPlatform.buildRustPackage`
+- **Npm**: `buildNpmPackage`
+- **Go**: `buildGoModule`
+- **GitHub**: content heuristic — "github.com" + "releases" + "download"
+- **Git**: default fallback
 
 ### Update Flow
 
-1. **Discovery**: Walk directories, parse Nix files, extract metadata (pname, version, hash, homepage)
-2. **Parallel Updates**: Use rayon to process packages concurrently
-3. **Version Check**: Query external API (PyPI, GitHub, etc.) for latest version
-4. **AST Updates**: Use `Ast::set()` to update version, hash, and platform-specific hashes
-5. **Build Verification**: Run `nix build` to verify changes work
-6. **Cachix Push**: Optionally push successful builds to user's cachix cache
+1. **Discovery** — Walk `packages/` and `nix/packages/` directories, parse Nix files, extract metadata (pname, version, hash, homepage)
+2. **Parallel Updates** — rayon `par_iter_mut()` processes packages concurrently, each with its own ProgressBar
+3. **Version Check** — Query external API for latest version
+4. **AST Updates** — `Ast::set()` updates values by finding AST nodes and replacing text ranges, then re-parses to keep the tree in sync
+5. **Build Verification** — `nix build .#{name} --no-link`, logs to `build-results/`
+6. **Cachix Push** — Optional push using `whoami::username()`
 
-### AST Manipulation
+### Key Patterns
 
-The `Ast` struct uses rnix to parse and modify Nix expressions:
-- Preserves formatting and comments
-- Updates values by finding exact AST nodes and replacing text ranges
-- Skips strings with interpolation (`${...}`)
-- Re-parses after each change to keep AST in sync
-- `platforms()` method extracts platformData/dists structures for multi-platform packages
-
-### Platform-Specific Updates
-
-Many packages have `platformData` or `dists` attribute sets with platform-specific filenames and hashes. The updater:
-1. Calls `ast.platforms()` to extract platform blocks
-2. For each platform, constructs the download URL
-3. Uses `Nix::prefetch_hash()` to get new hash
-4. Updates each hash individually using `ast.set()`
+- **AST text-range mutation**: rnix parses Nix into a syntax tree; `Ast` maintains both the text (`String`) and tree (`Parse<Root>`). Updates replace text at exact ranges then re-parse, preserving formatting and comments. Strings with interpolation (`${...}`) are skipped.
+- **Vendor hash discovery**: For Go/Cargo packages, the updater clears the vendor hash to an empty string, runs `nix build`, and parses the expected hash from stderr ("got: ...") to get the correct value.
+- **Platform-specific hashes**: `ast.platforms()` extracts `platformData`/`dists` attribute sets. Each platform's hash is fetched via `Nix::prefetch_hash()` and updated individually.
 
 ## Configuration
 
@@ -106,18 +89,10 @@ Uses figment to merge config from multiple sources (in priority order):
 2. `~/.config/nix-updater/config.toml` (optional)
 3. Environment variables prefixed with `NIX_UPDATER_`
 
-## Code Style Notes
-
-- Extensive clippy lints configured in Cargo.toml (pedantic, perf, correctness all denied)
-- Uses `edition = "2024"` Rust edition
-- Parallel processing with rayon for performance
-- Progress indicators for all operations
-- Colored terminal output for status
-
-## Important Implementation Details
+## Implementation Details
 
 - Package names are hyperlinked in terminal output using OSC-8 escape sequences
-- Git hashes are shortened to 8 characters for display
-- Build logs are written to `build-results/<package>.log`
-- The tool expects package files to have `pname`, `version`, `hash`, and `homepage` attributes
-- Updater trait provides `should_skip_update()` to avoid redundant updates unless `--force` is used
+- Git hashes shortened to 8 characters for display via `short_hash()`
+- Version comparison uses semver with fallback to string comparison
+- Package files must have `pname`, `version`, `hash`, and `homepage` attributes
+- Clippy pedantic/perf/correctness all denied in Cargo.toml
