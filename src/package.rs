@@ -90,10 +90,8 @@ impl Package {
                 continue;
             };
 
-            let Some(nix_hash) = updater.get("hash") else {
-                warn!(package = %pname, "Skipping: missing 'hash' attribute");
-                continue;
-            };
+            // Optional for fetchGit
+            let nix_hash = updater.get("hash").unwrap_or_default();
 
             let Some(version) = updater.get("version") else {
                 warn!(package = %pname, "Skipping: missing 'version' attribute");
