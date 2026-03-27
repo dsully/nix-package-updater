@@ -261,6 +261,28 @@ impl Ast {
         blocks
     }
 
+    /// Extract the `platforms` attribute from the `meta` block as raw text.
+    /// Returns the trailing segment (e.g. "linux", "darwin", "unix", "all") or None if absent.
+    pub fn meta_platforms(&self) -> Option<String> {
+        for child in self.ast.syntax().descendants() {
+            if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                && let Some(attr_path) = child.first_child()
+                && attr_path.text() == "platforms"
+            {
+                // The value is a NODE_SELECT (e.g. lib.platforms.linux) or NODE_IDENT
+                for value_node in child.children() {
+                    if value_node.kind() == SyntaxKind::NODE_SELECT || value_node.kind() == SyntaxKind::NODE_IDENT {
+                        let text = value_node.text().to_string();
+                        // Extract the last segment: "lib.platforms.linux" -> "linux"
+                        return text.rsplit('.').next().map(String::from);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     /// Update git revision and hash attributes
     pub fn update_git(&mut self, old_rev: Option<&str>, new_rev: &str, new_hash: &str, old_hash: Option<&str>) -> Result<()> {
         // Update rev first

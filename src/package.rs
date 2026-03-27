@@ -7,7 +7,7 @@ use git_url_parse::GitUrl;
 use rnix::{Parse, Root};
 use rootcause::Result;
 use strum::Display;
-use tracing::warn;
+use tracing::{info, warn};
 use walkdir::WalkDir;
 
 use crate::nix::ast::Ast;
@@ -71,6 +71,12 @@ impl Package {
                 continue;
             }
 
+            // Skip packages not supported on the current platform
+            if !Self::supported_on_current_platform(&updater) {
+                info!(package = %pname, "Skipping: not supported on current platform");
+                continue;
+            }
+
             // Determine package type by checking content
             let package_type = Self::detect_package_kind(&root_syntax, &content);
 
@@ -122,6 +128,19 @@ impl Package {
             PackageKind::GitHub
         } else {
             PackageKind::Git
+        }
+    }
+
+    fn supported_on_current_platform(ast: &Ast) -> bool {
+        let Some(platform) = ast.meta_platforms() else {
+            return true;
+        };
+
+        match platform.as_str() {
+            "linux" => cfg!(target_os = "linux"),
+            "darwin" => cfg!(target_os = "macos"),
+            // unix and all match everything
+            _ => true,
         }
     }
 
