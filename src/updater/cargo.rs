@@ -6,7 +6,7 @@ use crate::clients::nix::Nix;
 use crate::clients::{CratesIoClient, GitHubClient};
 use crate::nix::ast::Ast;
 use crate::package::Package;
-use crate::updater::{Updater, short_hash, version_is_greater};
+use crate::updater::{Updater, normalize_version, short_hash, version_is_greater};
 
 pub struct Cargo {
     force: bool,
@@ -117,7 +117,7 @@ impl Cargo {
             .latest_release(&package.homepage)
             .ok()
             .flatten()
-            .map(|tag| tag.trim_start_matches('v').to_string());
+            .map(|tag| normalize_version(&package.name, &tag));
 
         let cargo_version = self
             .github_client

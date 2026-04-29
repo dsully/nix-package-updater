@@ -27,10 +27,47 @@ pub fn short_hash(hash: impl AsRef<str>) -> String {
     hash.strip_prefix("sha256-").unwrap_or(hash).chars().take(8).collect()
 }
 
+pub fn normalize_version(package_name: &str, version: &str) -> String {
+    let package_version_prefix = format!("{package_name}-v");
+    let package_prefix = format!("{package_name}-");
+
+    version
+        .strip_prefix(&package_version_prefix)
+        .or_else(|| version.strip_prefix(&package_prefix))
+        .or_else(|| version.strip_prefix('v'))
+        .unwrap_or(version)
+        .to_string()
+}
+
 /// Compare two semantic versions, returns true if a > b
 pub fn version_is_greater(a: &str, b: &str) -> bool {
     match (semver::Version::parse(a), semver::Version::parse(b)) {
         (Ok(va), Ok(vb)) => va > vb,
         _ => a > b, // Fall back to string comparison if parsing fails
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_version;
+
+    #[test]
+    fn normalizes_package_prefixed_version() {
+        assert_eq!(normalize_version("example", "example-v1.2.3"), "1.2.3");
+    }
+
+    #[test]
+    fn normalizes_package_prefixed_version_without_v() {
+        assert_eq!(normalize_version("example", "example-1.2.3"), "1.2.3");
+    }
+
+    #[test]
+    fn normalizes_leading_version_prefix() {
+        assert_eq!(normalize_version("example", "v1.2.3"), "1.2.3");
+    }
+
+    #[test]
+    fn keeps_unprefixed_version() {
+        assert_eq!(normalize_version("example", "1.2.3"), "1.2.3");
     }
 }

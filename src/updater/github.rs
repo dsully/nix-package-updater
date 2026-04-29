@@ -5,7 +5,7 @@ use crate::Config;
 use crate::clients::GitHubClient;
 use crate::clients::nix::Nix;
 use crate::package::Package;
-use crate::updater::Updater;
+use crate::updater::{Updater, normalize_version};
 
 pub struct GitHubRelease {
     force: bool,
@@ -26,7 +26,7 @@ impl Updater for GitHubRelease {
             return Ok(());
         };
 
-        let latest_version = latest_tag.trim_start_matches('v').to_string();
+        let latest_version = normalize_version(&package.name, &latest_tag);
 
         if self.should_skip_update(self.force, &package.version, &latest_version) {
             package.result.up_to_date();
