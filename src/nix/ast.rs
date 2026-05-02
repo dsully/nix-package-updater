@@ -192,7 +192,7 @@ impl Ast {
         None
     }
 
-    /// Get platform data structures (platformData or dists)
+    /// Get platform data structures (platformData, dists, or packages)
     pub fn platforms(&self) -> Vec<PlatformBlock> {
         let mut blocks = Vec::new();
 
@@ -202,7 +202,7 @@ impl Ast {
             {
                 let attr_name = attr_path.text().to_string();
 
-                if attr_name == "platformData" || attr_name == "dists" {
+                if attr_name == "platformData" || attr_name == "dists" || attr_name == "packages" {
                     // Found platform data, now look for the immediate attr set
                     for value_node in child.children() {
                         if value_node.kind() == SyntaxKind::NODE_ATTR_SET {
@@ -350,5 +350,40 @@ impl Ast {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Ast;
+
+    #[test]
+    fn platforms_extracts_packages_blocks() {
+        let ast = Ast::from_ast(rnix::Root::parse(
+            r#"
+{
+  packages = {
+    aarch64-darwin = {
+      suffix = "aarch64-apple-darwin";
+      hash = "sha256-old-darwin";
+    };
+    x86_64-linux = {
+      suffix = "unknown-linux-gnu";
+      hash = "sha256-old-linux";
+    };
+  };
+}
+"#,
+        ));
+
+        let platforms = ast.platforms();
+
+        assert_eq!(platforms.len(), 2);
+        assert_eq!(platforms[0].platform_name, "aarch64-darwin");
+        assert_eq!(platforms[0].attributes.get("suffix").map(String::as_str), Some("aarch64-apple-darwin"));
+        assert_eq!(platforms[0].attributes.get("hash").map(String::as_str), Some("sha256-old-darwin"));
+        assert_eq!(platforms[1].platform_name, "x86_64-linux");
+        assert_eq!(platforms[1].attributes.get("suffix").map(String::as_str), Some("unknown-linux-gnu"));
+        assert_eq!(platforms[1].attributes.get("hash").map(String::as_str), Some("sha256-old-linux"));
     }
 }

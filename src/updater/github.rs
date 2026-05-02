@@ -12,6 +12,22 @@ pub struct GitHubRelease {
     client: GitHubClient,
 }
 
+fn release_asset_filename(package_name: &str, platform_name: &str, attributes: &std::collections::HashMap<String, String>) -> Option<String> {
+    attributes.get("filename").cloned().or_else(|| {
+        attributes.get("suffix").map(|suffix| {
+            let target = if platform_name.split_once('-').is_some_and(|(arch, _)| suffix.starts_with(arch)) {
+                suffix.clone()
+            } else if let Some((arch, _)) = platform_name.split_once('-') {
+                format!("{arch}-{suffix}")
+            } else {
+                suffix.clone()
+            };
+
+            format!("{package_name}-{target}.tar.gz")
+        })
+    })
+}
+
 impl Updater for GitHubRelease {
     fn new(config: &Config) -> Result<Self> {
         Ok(Self {
@@ -50,12 +66,11 @@ impl Updater for GitHubRelease {
         let repo_path = package.homepage.path();
 
         for block in platform_blocks {
-            if let Some(filename) = block.attributes.get("filename")
+            if let Some(filename) = release_asset_filename(&package.name, &block.platform_name, &block.attributes)
                 && let Some(old_hash) = block.attributes.get("hash")
             {
                 let url = format!("https://github.com/{repo_path}/releases/download/{latest_tag}/{filename}");
 
-                // Get new hash
                 if let Some(new_hash) = Nix::prefetch_hash(&url)? {
                     ast.set("hash", old_hash, &new_hash)?;
                 } else {
@@ -69,5 +84,29 @@ impl Updater for GitHubRelease {
         package.result.version(Some(package.version.as_ref()), Some(latest_version.as_ref()));
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::release_asset_filename;
+
+    #[test]
+    fn release_asset_filename_uses_explicit_filename() {
+        let attributes = HashMap::from([("filename".to_string(), "tool-linux.tar.gz".to_string())]);
+
+        assert_eq!(release_asset_filename("tool", "x86_64-linux", &attributes).as_deref(), Some("tool-linux.tar.gz"));
+    }
+
+    #[test]
+    fn release_asset_filename_builds_tarball_name_from_suffix() {
+        let attributes = HashMap::from([("suffix".to_string(), "unknown-linux-gnu".to_string())]);
+
+        assert_eq!(
+            release_asset_filename("icm", "x86_64-linux", &attributes).as_deref(),
+            Some("icm-x86_64-unknown-linux-gnu.tar.gz")
+        );
     }
 }
