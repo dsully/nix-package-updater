@@ -14,6 +14,10 @@ pub struct Cargo {
     crates_client: CratesIoClient,
 }
 
+fn cargo_vendor_needs_update(current_rev: Option<&str>, latest_rev: Option<&str>, current_version: &str, latest_version: &str) -> bool {
+    current_rev != latest_rev || current_version != latest_version
+}
+
 impl Updater for Cargo {
     fn new(config: &Config) -> Result<Self> {
         Ok(Self {
@@ -69,8 +73,10 @@ impl Cargo {
             ast.set("hash", &old_hash, &new_hash)?;
         }
 
-        ast.clear_vendor_hash("cargo")?;
-        ast.update_vendor(package, "cargo", pb)?;
+        if cargo_vendor_needs_update(None, None, &package.version, latest_version) {
+            ast.clear_vendor_hash("cargo")?;
+            ast.update_vendor(package, "cargo", pb)?;
+        }
 
         package.write(&ast)?;
 
@@ -119,34 +125,21 @@ impl Cargo {
             .flatten()
             .map(|tag| normalize_version(&package.name, &tag));
 
-        let cargo_version = self
-            .github_client
-            .cargo_version(&package.homepage, &latest_git_commit)
-            .ok()
-            .flatten();
+        let cargo_version = self.github_client.cargo_version(&package.homepage, &latest_git_commit).ok().flatten();
 
         // Pick the higher version, or fall back to short hash for non-semantic packages
         let latest_version = match (&release_version, &cargo_version) {
             (Some(rel), Some(cargo)) => {
                 // Compare versions - pick higher one
-                if version_is_greater(cargo, rel) {
-                    cargo.clone()
-                } else {
-                    rel.clone()
-                }
+                if version_is_greater(cargo, rel) { cargo.clone() } else { rel.clone() }
             }
             (Some(rel), None) => rel.clone(),
             (None, Some(cargo)) => cargo.clone(),
             (None, None) => {
                 // No version source found - only use short hash if current version is hash-like
-                let is_semantic_version =
-                    package.version.contains('.') && package.version.chars().any(|c| c.is_ascii_digit());
+                let is_semantic_version = package.version.contains('.') && package.version.chars().any(|c| c.is_ascii_digit());
 
-                if is_semantic_version {
-                    package.version.clone()
-                } else {
-                    short_hash(&latest_git_commit)
-                }
+                if is_semantic_version { package.version.clone() } else { short_hash(&latest_git_commit) }
             }
         };
 
@@ -154,21 +147,39 @@ impl Cargo {
             ast.set("version", &package.version, &latest_version)?;
         }
 
-        ast.clear_vendor_hash("cargo")?;
-        ast.update_vendor(package, "cargo", pb)?;
+        if cargo_vendor_needs_update(Some(&current_git_commit), Some(&latest_git_commit), &package.version, &latest_version) {
+            ast.clear_vendor_hash("cargo")?;
+            ast.update_vendor(package, "cargo", pb)?;
+        }
 
         package.write(&ast)?;
 
-        package
-            .result
-            .git_commit(Some(current_git_commit.as_ref()), Some(latest_git_commit.as_ref()));
+        package.result.git_commit(Some(current_git_commit.as_ref()), Some(latest_git_commit.as_ref()));
 
         if package.version != latest_version {
-            package
-                .result
-                .version(Some(package.version.as_ref()), Some(latest_version.as_ref()));
+            package.result.version(Some(package.version.as_ref()), Some(latest_version.as_ref()));
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cargo_vendor_needs_update;
+
+    #[test]
+    fn cargo_vendor_does_not_update_when_rev_and_version_are_unchanged() {
+        assert!(!cargo_vendor_needs_update(Some("abc"), Some("abc"), "1.0.0", "1.0.0"));
+    }
+
+    #[test]
+    fn cargo_vendor_updates_when_rev_changes() {
+        assert!(cargo_vendor_needs_update(Some("abc"), Some("def"), "1.0.0", "1.0.0"));
+    }
+
+    #[test]
+    fn cargo_vendor_updates_when_version_changes() {
+        assert!(cargo_vendor_needs_update(None, None, "1.0.0", "1.0.1"));
     }
 }
