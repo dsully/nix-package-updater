@@ -63,19 +63,18 @@ impl Ast {
                                 found_attr = true;
                             }
                         }
-                        SyntaxKind::NODE_STRING => {
-                            if found_attr && extract_string_value(&attr_child) == old_value {
-                                //
-                                // Skip updating strings with interpolation: (${...})
-                                let content = attr_child.text().to_string();
+                        SyntaxKind::NODE_STRING
+                            if found_attr && extract_string_value(&attr_child) == old_value =>
+                        {
+                            // Skip updating strings with interpolation: (${...})
+                            let content = attr_child.text().to_string();
 
-                                if content.contains("${") && content.contains('}') {
-                                    return Ok(());
-                                }
-
-                                string_node = Some(attr_child);
-                                break;
+                            if content.contains("${") && content.contains('}') {
+                                return Ok(());
                             }
+
+                            string_node = Some(attr_child);
+                            break;
                         }
                         _ => {}
                     }

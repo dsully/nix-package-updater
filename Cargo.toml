@@ -63,7 +63,7 @@ correctness = { level = "deny", priority = -1 }
 dbg_macro = "warn"
 debug_assert_with_mut_call = "warn"
 doc_markdown = { level = "allow", priority = 1 }
-empty_enum = "warn"
+empty_enums = "warn"
 empty_line_after_doc_comments = "allow"
 empty_line_after_outer_attr = "allow"
 enum_glob_use = "warn"

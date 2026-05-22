@@ -243,7 +243,7 @@ impl UpdateResult {
         {
             self.status.insert(UpdateStatus::Updated);
 
-            self.changes.push(format!("{o} → {n}",));
+            self.changes.push(format!("{o} → {n}"));
 
             self.old_version = old.map(String::from);
             self.new_version = new.map(String::from);
