@@ -30,6 +30,7 @@ pub fn short_hash(hash: impl AsRef<str>) -> String {
 pub fn normalize_version(package_name: &str, version: &str) -> String {
     let package_version_prefix = format!("{package_name}-v");
     let package_prefix = format!("{package_name}-");
+    let version = version.rsplit('/').next().unwrap_or(version);
 
     version
         .strip_prefix(&package_version_prefix)
@@ -64,6 +65,11 @@ mod tests {
     #[test]
     fn normalizes_leading_version_prefix() {
         assert_eq!(normalize_version("example", "v1.2.3"), "1.2.3");
+    }
+
+    #[test]
+    fn normalizes_path_prefixed_version() {
+        assert_eq!(normalize_version("mcp-mux", "muxcore/v0.24.3"), "0.24.3");
     }
 
     #[test]

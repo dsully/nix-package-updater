@@ -5,11 +5,15 @@ use crate::Config;
 use crate::clients::GitHubClient;
 use crate::clients::nix::Nix;
 use crate::package::Package;
-use crate::updater::Updater;
+use crate::updater::{Updater, normalize_version};
 
 pub struct GoUpdater {
     force: bool,
     github_client: GitHubClient,
+}
+
+fn go_package_is_current(force: bool, current_rev: Option<&str>, latest_rev: Option<&str>, current_version: &str, latest_version: Option<&str>) -> bool {
+    !force && current_rev == latest_rev && latest_version.is_none_or(|version| current_version == version)
 }
 
 impl Updater for GoUpdater {
@@ -25,10 +29,15 @@ impl Updater for GoUpdater {
 
         let current_git_commit = ast_tmp.get("rev");
         let latest_git_commit = self.github_client.latest_commit(&package.homepage)?;
+        let latest_version = self.github_client.latest_release(&package.homepage)?.map(|tag| normalize_version(&package.name, &tag));
 
-        if let (Some(current), Some(latest)) = (&current_git_commit, &latest_git_commit)
-            && self.should_skip_update(self.force, current, latest)
-        {
+        if go_package_is_current(
+            self.force,
+            current_git_commit.as_deref(),
+            latest_git_commit.as_deref(),
+            &package.version,
+            latest_version.as_deref(),
+        ) {
             package.result.up_to_date();
             return Ok(());
         }
@@ -50,13 +59,39 @@ impl Updater for GoUpdater {
         // Update rev and hash (version is updated automatically if it contains the old rev)
         ast.update_git(current_git_commit.as_deref(), &latest_commit, &new_hash, None)?;
 
-        ast.clear_vendor_hash("vendor")?;
-        ast.update_vendor(package, "vendor", pb)?;
+        if let Some(version) = &latest_version
+            && package.version != *version
+        {
+            ast.set("version", &package.version, version)?;
+        }
+
+        if current_git_commit.as_deref() != Some(latest_commit.as_str()) {
+            ast.clear_vendor_hash("vendor")?;
+            ast.update_vendor(package, "vendor", pb)?;
+        }
 
         package.write(&ast)?;
 
-        package.result.git_commit(current_git_commit.as_deref(), Some(&latest_commit));
+        if current_git_commit.as_deref() != Some(latest_commit.as_str()) {
+            package.result.git_commit(current_git_commit.as_deref(), Some(&latest_commit));
+        }
+
+        if let Some(version) = &latest_version
+            && package.version != *version
+        {
+            package.result.version(Some(package.version.as_ref()), Some(version.as_ref()));
+        }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::go_package_is_current;
+
+    #[test]
+    fn package_is_not_current_when_release_version_is_newer_than_package_version() {
+        assert!(!go_package_is_current(false, Some("abc"), Some("abc"), "0.24.1", Some("0.24.3")));
     }
 }
