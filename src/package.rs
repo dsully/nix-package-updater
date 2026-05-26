@@ -77,6 +77,12 @@ impl Package {
                 continue;
             }
 
+            // Skip purely local packages (src = ./.) — there is no upstream to track
+            if updater.has_local_src() {
+                info!(package = %pname, "Skipping: local source");
+                continue;
+            }
+
             // Determine package type by checking content
             let package_type = Self::detect_package_kind(&root_syntax, &content);
 

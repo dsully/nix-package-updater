@@ -46,6 +46,27 @@ impl Ast {
         false
     }
 
+    /// Whether `src` is a local path (e.g. `src = ./.;`) rather than a fetcher.
+    ///
+    /// Such packages have no upstream to track, so there is nothing to update.
+    pub fn has_local_src(&self) -> bool {
+        for child in self.ast.syntax().descendants() {
+            if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE
+                && let Some(key) = child.first_child()
+                && key.kind() == SyntaxKind::NODE_ATTRPATH
+                && key.text() == "src"
+                && let Some(value) = child.last_child()
+            {
+                return matches!(
+                    value.kind(),
+                    SyntaxKind::NODE_PATH_REL | SyntaxKind::NODE_PATH_ABS | SyntaxKind::NODE_PATH_HOME
+                );
+            }
+        }
+
+        false
+    }
+
     /// Set an attribute value using precise AST-guided replacement
     pub fn set(&mut self, attr_name: &str, old_value: &str, new_value: &str) -> Result<()> {
         // Find the exact location of the attribute in the AST
@@ -384,5 +405,38 @@ mod tests {
         assert_eq!(platforms[1].platform_name, "x86_64-linux");
         assert_eq!(platforms[1].attributes.get("suffix").map(String::as_str), Some("unknown-linux-gnu"));
         assert_eq!(platforms[1].attributes.get("hash").map(String::as_str), Some("sha256-old-linux"));
+    }
+
+    #[test]
+    fn detects_local_src() {
+        let ast = Ast::from_ast(rnix::Root::parse(
+            r#"
+{
+  pname = "opencode-notifier";
+  version = "1.0.0";
+  src = ./.;
+}
+"#,
+        ));
+
+        assert!(ast.has_local_src());
+    }
+
+    #[test]
+    fn fetcher_src_is_not_local() {
+        let ast = Ast::from_ast(rnix::Root::parse(
+            r#"
+{
+  pname = "example";
+  version = "1.0.0";
+  src = fetchPypi {
+    inherit pname version;
+    hash = "sha256-abc";
+  };
+}
+"#,
+        ));
+
+        assert!(!ast.has_local_src());
     }
 }
