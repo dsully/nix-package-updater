@@ -26,7 +26,16 @@ nix build
 
 # Push successful builds to cachix
 ./result/bin/nix-package-updater --cache
+
+# Add a package, preferring pre-built GitHub release binaries
+./result/bin/nix-package-add https://github.com/rtk-ai/icm --license asl20
+./result/bin/nix-package-add https://github.com/Dicklesworthstone/pi_agent_rust \
+  --pname pi-agent-rust --binary pi --license mit
 ```
+
+## nix-package-add
+
+`nix-package-add` creates `~/.config/nix/packages/<pname>.nix` by default. For GitHub repositories it checks the latest release for pre-built archives matching Nix platforms, prefetches their hashes, and writes a per-platform `fetchurl` package. Non-GitHub URLs, GitHub repositories without releases, and repositories without matching binaries are passed through to `nix-init`. Extra `nix-init` arguments can be supplied after `--`.
 
 ## Features
 
