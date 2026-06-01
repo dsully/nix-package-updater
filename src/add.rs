@@ -269,10 +269,7 @@ in
 }
 
 fn version_from_tag(tag: &str, pname: &str) -> String {
-    tag.strip_prefix(&format!("{pname}-v"))
-        .or_else(|| tag.strip_prefix('v'))
-        .unwrap_or(tag)
-        .to_string()
+    tag.strip_prefix(&format!("{pname}-v")).or_else(|| tag.strip_prefix('v')).unwrap_or(tag).to_string()
 }
 
 fn is_archive(name: &str) -> bool {
@@ -280,34 +277,24 @@ fn is_archive(name: &str) -> bool {
 }
 
 fn platform_suffix(name: &str) -> Option<(&'static str, String)> {
-    const MATCHES: [(&str, &str); 12] = [
+    const MATCHES: [(&str, &str); 7] = [
         ("aarch64-apple-darwin", "aarch64-darwin"),
         ("arm64-apple-darwin", "aarch64-darwin"),
         ("darwin-arm64", "aarch64-darwin"),
         ("macos-arm64", "aarch64-darwin"),
-        ("x86_64-apple-darwin", "x86_64-darwin"),
-        ("darwin-amd64", "x86_64-darwin"),
-        ("macos-amd64", "x86_64-darwin"),
         ("x86_64-unknown-linux-gnu", "x86_64-linux"),
         ("x86_64-linux", "x86_64-linux"),
         ("linux-amd64", "x86_64-linux"),
-        ("aarch64-unknown-linux-gnu", "aarch64-linux"),
-        ("linux-arm64", "aarch64-linux"),
     ];
 
-    MATCHES.iter().find_map(|(needle, system)| {
-        name.contains(needle).then(|| (*system, (*needle).to_string()))
-    })
+    MATCHES.iter().find_map(|(needle, system)| name.contains(needle).then(|| (*system, (*needle).to_string())))
 }
 
 fn prefetch_hash(url: &str) -> Result<String> {
     let output = Command::new("nix").args(["store", "prefetch-file", url, "--json"]).output()?;
 
     if !output.status.success() {
-        return Err(report!(
-            "nix store prefetch-file failed for {url}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+        return Err(report!("nix store prefetch-file failed for {url}: {}", String::from_utf8_lossy(&output.stderr)));
     }
 
     Ok(serde_json::from_slice::<PrefetchResult>(&output.stdout)?.hash)

@@ -1133,7 +1133,7 @@ dependencies = [
 
 [[package]]
 name = "nix-package-updater"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "clap",
  "clap_complete",
