@@ -50,20 +50,24 @@ impl Updater for NpmUpdater {
             return Ok(());
         };
 
-        // Download package-lock.json from GitHub at the specific commit
-        if let Some(pb) = pb {
-            pb.set_message(format!("{}: Downloading package-lock.json...", package.name()));
+        // buildNpmPackage reads package-lock.json from src by default. Only fetch and vendor a
+        // standalone lockfile when the package definition references ./package-lock.json (upstreams
+        // that don't ship one). Otherwise bumping the source is sufficient.
+        if references_package_lock(ast_tmp.content()) {
+            if let Some(pb) = pb {
+                pb.set_message(format!("{}: Downloading package-lock.json...", package.name()));
+            }
+
+            // Use the specific commit hash to get the exact package-lock.json
+            let package_lock_url = format!("https://raw.githubusercontent.com/{}/{}/package-lock.json", package.homepage.path(), latest_commit);
+
+            let Some(package_lock_content) = self.npm_client.download_package_lock(&package_lock_url)? else {
+                package.result.failed("Could not download package-lock.json from repository");
+                return Ok(());
+            };
+
+            save_package_lock(&package.path, &package_lock_content)?;
         }
-
-        // Use the specific commit hash to get the exact package-lock.json
-        let package_lock_url = format!("https://raw.githubusercontent.com/{}/{}/package-lock.json", package.homepage.path(), latest_commit);
-
-        let Some(package_lock_content) = self.npm_client.download_package_lock(&package_lock_url)? else {
-            package.result.failed("Could not download package-lock.json from repository");
-            return Ok(());
-        };
-
-        save_package_lock(&package.path, &package_lock_content)?;
 
         let mut ast = package.ast();
 
@@ -91,6 +95,11 @@ impl Updater for NpmUpdater {
 
         Ok(())
     }
+}
+
+/// Whether the package definition vendors a standalone `./package-lock.json`.
+fn references_package_lock(content: &str) -> bool {
+    content.contains("package-lock.json")
 }
 
 /// Save package-lock.json next to the Nix file
