@@ -7,7 +7,7 @@ use git_url_parse::GitUrl;
 use rnix::{Parse, Root};
 use rootcause::Result;
 use strum::Display;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
 use crate::nix::ast::Ast;
@@ -87,12 +87,12 @@ impl Package {
             let package_type = Self::detect_package_kind(&root_syntax, &content);
 
             let Some(homepage_str) = updater.get("homepage") else {
-                warn!(package = %pname, "Skipping: missing 'homepage' attribute");
+                debug!(package = %pname, "Skipping: missing 'homepage' attribute");
                 continue;
             };
 
             let Ok(homepage) = GitUrl::parse(&homepage_str) else {
-                warn!(package = %pname, url = %homepage_str, "Skipping: invalid homepage URL");
+                debug!(package = %pname, url = %homepage_str, "Skipping: invalid homepage URL");
                 continue;
             };
 
