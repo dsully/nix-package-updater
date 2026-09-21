@@ -1,6 +1,6 @@
 [package]
 name = "nix-package-updater"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 homepage = "https://github.com/dsully/nix-package-updater"
 
@@ -22,7 +22,7 @@ git-url-parse = "0.6.0"
 indicatif = "0.18"
 itertools = "0.15"
 octocrab = {
-  version = "0.53",
+  version = "0.54.2",
   default-features = false,
   features = [
     "default-client",

@@ -150,7 +150,7 @@ impl Package {
 
     /// Format the package name with hyperlink if homepage is available
     pub fn name(&self) -> String {
-        format!("\x1B]8;;{}\x1B\\{}\x1B]8;;\x1B\\", &self.homepage.to_string(), &self.name).cyan().to_string()
+        format!("\x1B]8;;{}\x1B\\{}\x1B]8;;\x1B\\", self.homepage, self.name).cyan().to_string()
     }
 
     /// Get the visual display width of the package name (excluding escape sequences)
