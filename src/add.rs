@@ -277,14 +277,16 @@ fn is_archive(name: &str) -> bool {
 }
 
 fn platform_suffix(name: &str) -> Option<(&'static str, String)> {
-    const MATCHES: [(&str, &str); 7] = [
+    const MATCHES: [(&str, &str); 9] = [
         ("aarch64-apple-darwin", "aarch64-darwin"),
         ("arm64-apple-darwin", "aarch64-darwin"),
         ("darwin-arm64", "aarch64-darwin"),
+        ("darwin_arm64", "aarch64-darwin"),
         ("macos-arm64", "aarch64-darwin"),
         ("x86_64-unknown-linux-gnu", "x86_64-linux"),
         ("x86_64-linux", "x86_64-linux"),
         ("linux-amd64", "x86_64-linux"),
+        ("linux_amd64", "x86_64-linux"),
     ];
 
     MATCHES.iter().find_map(|(needle, system)| name.contains(needle).then(|| (*system, (*needle).to_string())))

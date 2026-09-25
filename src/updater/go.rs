@@ -13,7 +13,7 @@ pub struct GoUpdater {
 }
 
 fn go_package_is_current(force: bool, current_rev: Option<&str>, latest_rev: Option<&str>, current_version: &str, latest_version: Option<&str>) -> bool {
-    !force && current_rev == latest_rev && latest_version.is_none_or(|version| current_version == version)
+    !force && current_rev == latest_rev && (current_version.contains("${") || latest_version.is_none_or(|version| current_version == version))
 }
 
 impl Updater for GoUpdater {
@@ -93,5 +93,10 @@ mod tests {
     #[test]
     fn package_is_not_current_when_release_version_is_newer_than_package_version() {
         assert!(!go_package_is_current(false, Some("abc"), Some("abc"), "0.24.1", Some("0.24.3")));
+    }
+
+    #[test]
+    fn package_is_current_when_version_interpolates_rev_and_rev_matches() {
+        assert!(go_package_is_current(false, Some("abc"), Some("abc"), "0.7.1-${rev}", Some("0.7.1")));
     }
 }
