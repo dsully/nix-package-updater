@@ -36,8 +36,13 @@ pub fn normalize_version(package_name: &str, version: &str) -> String {
         .strip_prefix(&package_version_prefix)
         .or_else(|| version.strip_prefix(&package_prefix))
         .or_else(|| version.strip_prefix('v'))
-        .unwrap_or(version)
-        .to_string()
+        .unwrap_or(version);
+
+    // Tags like "bolt-v0.8.5" carry a prefix that is not the package name.
+    match version.find(|c: char| c.is_ascii_digit()) {
+        Some(start) if start > 0 && version[..start].ends_with(['v', '-', '_']) => version[start..].to_string(),
+        _ => version.to_string(),
+    }
 }
 
 /// Compare two semantic versions, returns true if a > b
@@ -70,6 +75,11 @@ mod tests {
     #[test]
     fn normalizes_path_prefixed_version() {
         assert_eq!(normalize_version("mcp-mux", "muxcore/v0.24.3"), "0.24.3");
+    }
+
+    #[test]
+    fn normalizes_foreign_tag_prefix() {
+        assert_eq!(normalize_version("pi-bolt", "bolt-v0.8.5"), "0.8.5");
     }
 
     #[test]
