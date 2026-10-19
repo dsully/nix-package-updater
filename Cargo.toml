@@ -1,6 +1,6 @@
 [package]
 name = "nix-package-updater"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 homepage = "https://github.com/dsully/nix-package-updater"
 
@@ -44,7 +44,7 @@ tracing = "0.1"
 tracing-indicatif = "0.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 walkdir = "2.5"
-whoami = { version = "2", default-features = false }
+whoami = { version = "2", default-features = false, features = ["std"] }
 zstd = "0.14.3"
 
 [dependencies.octocrab]
