@@ -2,10 +2,11 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use indicatif::ProgressBar;
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget};
 use rootcause::Result;
 use whoami::username;
 
+use crate::nix::cachix;
 use crate::package::{Package, UpdateStatus};
 
 pub fn build_package(package: &mut Package, pb: &ProgressBar, build_path: &Path, cache: bool) -> Result<()> {
@@ -35,22 +36,12 @@ pub fn build_package(package: &mut Package, pb: &ProgressBar, build_path: &Path,
 pub fn push_to_cachix(package: &mut Package, pb: &ProgressBar) -> Result<()> {
     pb.set_message(format!("{}: Pushing to cachix ...", package.name()));
 
-    let output = Command::new("nix").args(["path-info", &format!(".#{}", package.name)]).output()?;
+    // The package spinner already reports this step; per-path bars would fight main's MultiProgress for stderr.
+    let hidden = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
 
-    if output.status.success() {
-        let user = username()?;
-        let paths = String::from_utf8_lossy(&output.stdout);
+    cachix::push(&username()?, &[format!(".#{}", package.name)], &hidden)?;
 
-        for path in paths.lines() {
-            if !path.is_empty() {
-                Command::new("cachix")
-                    .args(["push", "--compression-method", "xz", "--compression-level", "6", &user, path])
-                    .output()?;
-
-                package.result.status.insert(UpdateStatus::Cached);
-            }
-        }
-    }
+    package.result.status.insert(UpdateStatus::Cached);
 
     Ok(())
 }
