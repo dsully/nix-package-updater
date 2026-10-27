@@ -1,6 +1,7 @@
+use std::path::Path;
 use std::process::Command;
 
-use rootcause::Result;
+use rootcause::{Result, report};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +32,23 @@ impl Nix {
         }
 
         Ok(None)
+    }
+
+    /// Add a file to the store the way `requireFile` expects it and return its flat SRI hash.
+    pub fn add_fixed(path: &Path) -> Result<String> {
+        let added = Command::new("nix-store").args(["--add-fixed", "sha256"]).arg(path).output()?;
+
+        if !added.status.success() {
+            return Err(report!("nix-store --add-fixed failed for {}: {}", path.display(), String::from_utf8_lossy(&added.stderr)));
+        }
+
+        let hashed = Command::new("nix").args(["hash", "file", "--sri"]).arg(path).output()?;
+
+        if !hashed.status.success() {
+            return Err(report!("nix hash file failed for {}: {}", path.display(), String::from_utf8_lossy(&hashed.stderr)));
+        }
+
+        Ok(String::from_utf8_lossy(&hashed.stdout).trim().to_string())
     }
 
     pub fn hash_and_rev(url: &str, rev: Option<&str>) -> Result<Option<(String, Option<String>)>> {

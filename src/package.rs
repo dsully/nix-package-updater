@@ -128,7 +128,7 @@ impl Package {
             PackageKind::Npm
         } else if Ast::contains_function_call(root, "buildGoModule") {
             PackageKind::Go
-        } else if content.contains("github.com") && content.contains("releases") && content.contains("download") {
+        } else if Ast::contains_function_call(root, "requireFile") || (content.contains("github.com") && content.contains("releases") && content.contains("download")) {
             PackageKind::GitHub
         } else {
             PackageKind::Git
@@ -256,5 +256,29 @@ impl UpdateResult {
         }
 
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Package, PackageKind};
+
+    #[test]
+    fn detect_package_kind_treats_require_file_as_github_release() {
+        let content = r#"{ stdenv, requireFile }:
+stdenv.mkDerivation rec {
+  pname = "tool";
+  version = "0.1.0";
+  src = requireFile {
+    name = "${pname}-aarch64-apple-darwin.tar.gz";
+    url = "https://github.com/owner/${pname}/releases/tag/v${version}";
+    hash = "sha256-abc";
+  };
+  meta.homepage = "https://github.com/owner/tool";
+}
+"#;
+        let root = rnix::Root::parse(content).syntax();
+
+        assert!(Package::detect_package_kind(&root, content) == PackageKind::GitHub);
     }
 }

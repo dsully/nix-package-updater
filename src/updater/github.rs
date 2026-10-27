@@ -4,6 +4,7 @@ use rootcause::Result;
 use crate::Config;
 use crate::clients::GitHubClient;
 use crate::clients::nix::Nix;
+use crate::nix::ast::Ast;
 use crate::package::Package;
 use crate::updater::{Updater, normalize_version};
 
@@ -29,10 +30,45 @@ fn release_asset_filename(package_name: &str, platform_name: &str, attributes: &
 }
 
 fn asset_url(template: &str, package_name: &str, version: &str, attributes: &std::collections::HashMap<String, String>) -> String {
-    attributes.iter().fold(
-        template.replace("${pname}", package_name).replace("${version}", version),
-        |url, (key, value)| url.replace(&format!("${{source.{key}}}"), value),
-    )
+    attributes
+        .iter()
+        .fold(template.replace("${pname}", package_name).replace("${version}", version), |url, (key, value)| {
+            url.replace(&format!("${{source.{key}}}"), value)
+        })
+}
+
+impl GitHubRelease {
+    /// Nix fetchers cannot authenticate, so download the asset here and add it to the store for `requireFile`.
+    fn update_required_file(&self, package: &mut Package, mut ast: Ast, tag: &str, version: &str) -> Result<()> {
+        let Some(name) = ast
+            .get("name")
+            .map(|template| asset_url(&template, &package.name, version, &std::collections::HashMap::new()))
+        else {
+            package.result.failed("requireFile has no name");
+            return Ok(());
+        };
+
+        let Some(bytes) = self.client.release_asset(&package.homepage, tag, &name)? else {
+            package.result.failed(format!("Release {tag} has no asset {name}"));
+            return Ok(());
+        };
+
+        let dir = std::env::temp_dir().join(format!("nix-package-updater-{}-{}", std::process::id(), package.name));
+        std::fs::create_dir_all(&dir)?;
+
+        let path = dir.join(&name);
+        std::fs::write(&path, bytes)?;
+
+        let new_hash = Nix::add_fixed(&path);
+        std::fs::remove_dir_all(&dir)?;
+
+        ast.set("hash", &package.nix_hash, &new_hash?)?;
+
+        package.write(&ast)?;
+        package.result.version(Some(package.version.as_ref()), Some(version));
+
+        Ok(())
+    }
 }
 
 impl Updater for GitHubRelease {
@@ -59,6 +95,10 @@ impl Updater for GitHubRelease {
         let mut ast = package.ast();
 
         ast.set("version", &package.version, &latest_version)?;
+
+        if Ast::contains_function_call(&package.ast.syntax(), "requireFile") {
+            return self.update_required_file(package, ast, &latest_tag, &latest_version);
+        }
 
         let platform_blocks = ast.platforms();
 

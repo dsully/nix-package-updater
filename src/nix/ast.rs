@@ -57,10 +57,7 @@ impl Ast {
                 && key.text() == "src"
                 && let Some(value) = child.last_child()
             {
-                return matches!(
-                    value.kind(),
-                    SyntaxKind::NODE_PATH_REL | SyntaxKind::NODE_PATH_ABS | SyntaxKind::NODE_PATH_HOME
-                );
+                return matches!(value.kind(), SyntaxKind::NODE_PATH_REL | SyntaxKind::NODE_PATH_ABS | SyntaxKind::NODE_PATH_HOME);
             }
         }
 
@@ -84,9 +81,7 @@ impl Ast {
                                 found_attr = true;
                             }
                         }
-                        SyntaxKind::NODE_STRING
-                            if found_attr && extract_string_value(&attr_child) == old_value =>
-                        {
+                        SyntaxKind::NODE_STRING if found_attr && extract_string_value(&attr_child) == old_value => {
                             // Skip updating strings with interpolation: (${...})
                             let content = attr_child.text().to_string();
 

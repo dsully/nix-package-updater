@@ -57,6 +57,30 @@ impl GitHubClient {
         })
     }
 
+    /// Download a release asset through the API, which also works for private repositories.
+    pub fn release_asset(&self, url: &GitUrl, tag: &str, name: &str) -> Result<Option<Vec<u8>>> {
+        let (owner, repo) = Self::owner_and_repo_from_url(url)?;
+
+        let release = self.runtime.block_on(self.client.repos(owner, repo).releases().get_by_tag(tag))?;
+
+        let Some(asset) = release.assets.into_iter().find(|asset| asset.name == name) else {
+            return Ok(None);
+        };
+
+        // Not octocrab: reqwest strips Authorization on the cross-host redirect to the signed asset URL.
+        let mut request = reqwest::blocking::Client::builder()
+            .user_agent(format!("nix-updater/{}", env!("CARGO_PKG_VERSION")))
+            .build()?
+            .get(asset.url.as_str())
+            .header(reqwest::header::ACCEPT, "application/octet-stream");
+
+        if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+            request = request.bearer_auth(token);
+        }
+
+        Ok(Some(request.send()?.error_for_status()?.bytes()?.to_vec()))
+    }
+
     #[allow(dead_code)]
     pub fn latest_tag(&self, url: &GitUrl) -> Result<Option<(String, String)>> {
         let (owner, repo) = Self::owner_and_repo_from_url(url)?;
@@ -121,15 +145,7 @@ impl GitHubClient {
         let (owner, repo) = Self::owner_and_repo_from_url(url)?;
 
         self.runtime.block_on(async {
-            match self
-                .client
-                .repos(&owner, &repo)
-                .get_content()
-                .path("Cargo.toml")
-                .r#ref(commit)
-                .send()
-                .await
-            {
+            match self.client.repos(&owner, &repo).get_content().path("Cargo.toml").r#ref(commit).send().await {
                 Ok(content) => {
                     if let Some(item) = content.items.first()
                         && let Some(decoded) = item.decoded_content()
