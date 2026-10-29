@@ -34,10 +34,14 @@ impl Ast {
 
     /// Check if content contains a specific function call
     pub fn contains_function_call(node: &SyntaxNode, function_name: &str) -> bool {
+        Self::contains_function_call_matching(node, |func| func.contains(function_name))
+    }
+
+    pub fn contains_function_call_matching(node: &SyntaxNode, matches: impl Fn(&str) -> bool) -> bool {
         for child in node.descendants() {
             if child.kind() == SyntaxKind::NODE_APPLY
                 && let Some(func) = child.first_child()
-                && func.text().to_string().contains(function_name)
+                && matches(&func.text().to_string())
             {
                 return true;
             }

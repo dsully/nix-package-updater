@@ -126,7 +126,10 @@ impl Package {
             PackageKind::Cargo
         } else if Ast::contains_function_call(root, "buildNpmPackage") {
             PackageKind::Npm
-        } else if Ast::contains_function_call(root, "buildGoModule") {
+        } else if Ast::contains_function_call_matching(root, |func| {
+            let name = func.rsplit('.').next().unwrap_or(func);
+            name.starts_with("buildGo") && name.ends_with("Module")
+        }) {
             PackageKind::Go
         } else if Ast::contains_function_call(root, "requireFile") || (content.contains("github.com") && content.contains("releases") && content.contains("download")) {
             PackageKind::GitHub
@@ -280,5 +283,15 @@ stdenv.mkDerivation rec {
         let root = rnix::Root::parse(content).syntax();
 
         assert!(Package::detect_package_kind(&root, content) == PackageKind::GitHub);
+    }
+
+    #[test]
+    fn detect_package_kind_treats_versioned_go_builders_as_go() {
+        for builder in ["buildGoModule", "buildGo127Module", "buildGoLatestModule"] {
+            let content = format!("{{ {builder} }}: {builder} rec {{ pname = \"tool\"; }}");
+            let root = rnix::Root::parse(&content).syntax();
+
+            assert!(Package::detect_package_kind(&root, &content) == PackageKind::Go, "{builder}");
+        }
     }
 }

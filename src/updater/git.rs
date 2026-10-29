@@ -32,10 +32,11 @@ impl Updater for GitRepository {
         // Update rev and hash
         ast.update_git(old_rev.as_deref(), &new_rev.clone().unwrap_or_default(), &new_hash, Some(&package.nix_hash))?;
 
-        ast.clear_vendor_hash("vendor")?;
-
-        if ast.get("cargoHash").is_some() {
-            ast.update_vendor(package, "cargo", pb)?;
+        for hash_type in ["vendor", "cargo"] {
+            if ast.get(&format!("{hash_type}Hash")).is_some() {
+                ast.clear_vendor_hash(hash_type)?;
+                ast.update_vendor(package, hash_type, pb)?;
+            }
         }
 
         package.write(&ast)?;
