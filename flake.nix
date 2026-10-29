@@ -10,7 +10,6 @@
   };
 
   outputs = {
-    self,
     nixpkgs,
     crane,
     flake-utils,
@@ -36,10 +35,11 @@
 
       package = craneLib.buildPackage (commonArgs // {inherit cargoArtifacts;});
 
-      clippy = craneLib.cargoClippy (commonArgs // {
-        inherit cargoArtifacts;
-        cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-      });
+      clippy = craneLib.cargoClippy (commonArgs
+        // {
+          inherit cargoArtifacts;
+          cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+        });
     in {
       packages = {
         default = package;

@@ -24,6 +24,7 @@ alias format := fmt
 
 [group('nix')]
 fmt:
+    @cargo +nightly fmt
     @alejandra .
     @deadnix .
     @statix check
