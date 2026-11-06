@@ -14,7 +14,7 @@ nix build .#clippy         # Build with clippy checks (--deny warnings)
 nix develop                # Development shell (cargo, rustc, clippy, rustfmt)
 ```
 
-The flake uses crane with a separated `buildDepsOnly`/`buildPackage` strategy for Nix store caching. There are currently no unit or integration tests.
+The flake uses crane with a separated `buildDepsOnly`/`buildPackage` strategy for Nix store caching. Run tests with `cargo test`.
 
 ## Usage
 
@@ -25,14 +25,14 @@ The flake uses crane with a separated `buildDepsOnly`/`buildPackage` strategy fo
 ./result/bin/nix-package-updater --build-only        # Build only, skip updates
 ./result/bin/nix-package-updater --force             # Force update even if up to date
 ./result/bin/nix-package-updater --cache             # Push builds to cachix
-./result/bin/nix-package-updater --dry-run           # Show what would be updated
+./result/bin/nix-package-updater --dry-run           # Check versions only: no file writes, vendor-hash builds, or package builds
 ```
 
 ## Architecture
 
 ### Module Structure
 
-- **`main.rs`** — Entry point, CLI parsing (clap), config loading (figment), package discovery, parallel processing with rayon, progress bars with indicatif
+- **`main.rs`** — Entry point, CLI parsing (clap), config loading (figment), package discovery, one thread per package for version checks, rayon for builds, progress bars with indicatif. Installs the ring rustls provider (reqwest uses `rustls-no-provider`)
 - **`package.rs`** — `Package` struct (name, path, kind, homepage, version, hash, AST, results) and `Package::discover()` which walks directories to find .nix files
 - **`nix/ast.rs`** — AST manipulation using rnix. `Ast` wraps parsed Nix code; key methods: `get()`, `set()`, `platforms()`, `update_git()`, `update_vendor()`
 - **`nix/builder.rs`** — Builds packages with `nix build`, writes logs to `build-results/`, pushes to cachix
@@ -70,7 +70,7 @@ pub trait Updater: Sized {
 ### Update Flow
 
 1. **Discovery** — Walk `packages/` and `nix/packages/` directories, parse Nix files, extract metadata (pname, version, hash, homepage)
-2. **Parallel Updates** — rayon `par_iter_mut()` processes packages concurrently, each with its own ProgressBar
+2. **Parallel Updates** — version checks are network-bound, so every package runs on its own scoped thread; builds then run on the rayon pool
 3. **Version Check** — Query external API for latest version
 4. **AST Updates** — `Ast::set()` updates values by finding AST nodes and replacing text ranges, then re-parses to keep the tree in sync
 5. **Build Verification** — `nix build .#{name} --no-link`, logs to `build-results/`

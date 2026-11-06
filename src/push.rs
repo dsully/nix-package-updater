@@ -32,6 +32,8 @@ impl Write for SuspendingStderr {
 }
 
 fn main() -> Result<()> {
+    // reqwest is built with `rustls-no-provider`; ring avoids also compiling aws-lc.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let progress = MultiProgress::new();
     let writer = progress.clone();
 

@@ -1,3 +1,5 @@
+use figment::Figment;
+use figment::providers::{Format, Toml};
 use git_url_parse::GitUrl;
 use git_url_parse::types::provider::GenericProvider;
 use octocrab::Octocrab;
@@ -121,7 +123,7 @@ impl GitHubClient {
                 Ok(content) => {
                     if let Some(item) = content.items.first()
                         && let Some(decoded) = item.decoded_content()
-                        && let Ok(cargo_toml) = toml::from_str::<CargoToml>(&decoded)
+                        && let Ok(cargo_toml) = Figment::from(Toml::string(&decoded)).extract::<CargoToml>()
                     {
                         return Ok(Some(cargo_toml.package.version));
                     }
@@ -130,5 +132,22 @@ impl GitHubClient {
                 Err(_) => Ok(None),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use figment::Figment;
+    use figment::providers::{Format, Toml};
+
+    use super::CargoToml;
+
+    #[test]
+    fn parses_package_version_from_cargo_toml() {
+        let manifest = "[package]\nname = \"x\"\nversion = \"1.2.3\"\nedition = \"2024\"\n\n[dependencies]\nserde = { version = \"1\", features = [\"derive\"] }\n\n[profile.release]\nlto = true\n";
+
+        let parsed: CargoToml = Figment::from(Toml::string(manifest)).extract().unwrap();
+
+        assert_eq!(parsed.package.version, "1.2.3");
     }
 }

@@ -105,6 +105,8 @@ struct PlatformAsset {
 }
 
 fn main() -> Result<()> {
+    // reqwest is built with `rustls-no-provider`; ring avoids also compiling aws-lc.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let args = Args::parse();
     let repo = parse_github_url(&args.url);
     let pname = args

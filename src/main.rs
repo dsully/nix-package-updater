@@ -245,6 +245,8 @@ fn print_results(packages: &[Package]) {
 }
 
 fn main() -> Result<()> {
+    // reqwest is built with `rustls-no-provider`; ring avoids also compiling aws-lc.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let strategy = choose_base_strategy().expect("Unable to find base strategy");
     let path = strategy.config_dir().join("nix-updater").join("config.toml");
 

@@ -33,13 +33,13 @@ rnix = "0.15"
 rootcause = "0.13"
 rootcause-backtrace = "0.13"
 rootcause-tracing = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 semver = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11"
 strum = { version = "0.28", features = ["derive"] }
-tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
-toml = "1"
+tokio = { version = "1", features = ["rt"] }
 tracing = "0.1"
 tracing-indicatif = "0.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -53,10 +53,9 @@ default-features = false
 features = [
   "default-client",
   "follow-redirect",
-  "jwt-aws-lc-rs",
   "retry",
   "rustls",
-  "rustls-aws-lc-rs",
+  "rustls-ring",
   "timeout",
   "tracing",
 ]
@@ -64,7 +63,7 @@ features = [
 [dependencies.reqwest]
 version = "0.13"
 default-features = false
-features = ["blocking", "json", "query", "rustls"]
+features = ["blocking", "json", "query", "rustls-no-provider"]
 
 # https://stackoverflow.com/a/74545562/81120
 [lints.clippy]
@@ -158,9 +157,20 @@ incremental = true
 opt-level = 3
 
 [profile.release]
-opt-level = 3
+opt-level = "z"
 lto = true
 incremental = true
+codegen-units = 1
+
+# Cachix pushes hash and compress whole NARs; keep those hot paths at full speed.
+[profile.release.package.zstd-sys]
+opt-level = 3
+
+[profile.release.package.sha2]
+opt-level = 3
+
+[profile.release.package.md-5]
+opt-level = 3
 
 # The profile that 'dist' will build with
 [profile.dist]
