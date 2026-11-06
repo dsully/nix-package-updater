@@ -34,6 +34,8 @@ pub struct Package {
     pub nix_hash: String,
 
     pub result: UpdateResult,
+
+    pub dry_run: bool,
 }
 
 impl Package {
@@ -113,6 +115,7 @@ impl Package {
                 version,
                 ast: ast.clone(),
                 result: UpdateResult::default(),
+                dry_run: false,
             });
         }
 
@@ -166,6 +169,10 @@ impl Package {
     }
 
     pub fn write(&self, ast: &Ast) -> Result<()> {
+        if self.dry_run {
+            return Ok(());
+        }
+
         Ok(std::fs::write(&self.path, ast.content())?)
     }
 

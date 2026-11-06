@@ -48,6 +48,11 @@ impl GitHubRelease {
             return Ok(());
         };
 
+        if package.dry_run {
+            package.result.version(Some(package.version.as_ref()), Some(version));
+            return Ok(());
+        }
+
         let Some(bytes) = self.client.release_asset(&package.homepage, tag, &name)? else {
             package.result.failed(format!("Release {tag} has no asset {name}"));
             return Ok(());

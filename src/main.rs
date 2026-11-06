@@ -172,7 +172,8 @@ fn process_packages(packages: &mut [Package], config: &Config, build_path: &Path
             }
         }
 
-        if (package.result.status.contains(&UpdateStatus::Updated) || config.force || config.build_only)
+        if !config.dry_run
+            && (package.result.status.contains(&UpdateStatus::Updated) || config.force || config.build_only)
             && let Err(e) = build_package(package, &pb, build_path, config.cache)
         {
             pb.suspend(|| error!(package = %package.name, "Build failed: {e}"));
@@ -248,6 +249,9 @@ fn main() -> Result<()> {
     }
 
     let mut packages = discover_packages(&config);
+    for p in &mut packages {
+        p.dry_run = config.dry_run;
+    }
 
     if packages.is_empty() {
         println!("{}", "No packages found to process".yellow());

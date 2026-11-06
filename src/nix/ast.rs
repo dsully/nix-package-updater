@@ -340,7 +340,10 @@ impl Ast {
 
     /// Update vendor hash by building the package and extracting the hash from error output
     pub fn update_vendor(&mut self, package: &Package, hash_type: &str, pb: Option<&ProgressBar>) -> Result<()> {
-        //
+        if package.dry_run {
+            return Ok(());
+        }
+
         if let Some(pb) = pb {
             pb.set_message(format!("{}: Building to get new {hash_type}Hash...", package.name()));
         } else {

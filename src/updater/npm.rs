@@ -66,7 +66,9 @@ impl Updater for NpmUpdater {
                 return Ok(());
             };
 
-            save_package_lock(&package.path, &package_lock_content)?;
+            if !package.dry_run {
+                save_package_lock(&package.path, &package_lock_content)?;
+            }
         }
 
         let mut ast = package.ast();
