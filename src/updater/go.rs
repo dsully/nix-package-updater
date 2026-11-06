@@ -28,8 +28,12 @@ impl Updater for GoUpdater {
         let ast_tmp = package.ast();
 
         let current_git_commit = ast_tmp.get("rev");
-        let latest_git_commit = self.github_client.latest_commit(&package.homepage)?;
-        let latest_version = self.github_client.latest_release(&package.homepage)?.map(|tag| normalize_version(&package.name, &tag));
+        let (latest_git_commit, latest_release) = std::thread::scope(|s| {
+            let release = s.spawn(|| self.github_client.latest_release(&package.homepage));
+            (self.github_client.latest_commit(&package.homepage), release.join().expect("latest_release thread panicked"))
+        });
+        let latest_git_commit = latest_git_commit?;
+        let latest_version = latest_release?.map(|tag| normalize_version(&package.name, &tag));
 
         if go_package_is_current(
             self.force,

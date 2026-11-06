@@ -7,7 +7,7 @@ mod updater;
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{fs, io};
 
 use clap::{CommandFactory, Parser};
@@ -24,7 +24,7 @@ use rootcause::{Result, report};
 use rootcause_backtrace::BacktraceCollector;
 use rootcause_tracing::{RootcauseLayer, SpanCollector};
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use tracing_indicatif::IndicatifLayer;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -149,39 +149,60 @@ fn process_packages(packages: &mut [Package], config: &Config, build_path: &Path
         .expect("Couldn't set spinner style")
         .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ");
 
-    packages.par_iter_mut().for_each(|package| {
+    let spinner = |message: String| {
         let pb = multi.add(ProgressBar::new_spinner());
         pb.enable_steady_tick(Duration::from_millis(50));
         pb.set_style(style.clone());
+        pb.set_message(message);
+        pb
+    };
 
-        if !config.build_only {
-            pb.set_message(format!("{}: Checking for version updates ...", package.name()));
+    // Version checks are network-bound, so run every package at once instead of one per core.
+    if !config.build_only {
+        std::thread::scope(|s| {
+            for package in packages.iter_mut() {
+                s.spawn(|| {
+                    let t0 = Instant::now();
+                    let pb = spinner(format!("{}: Checking for version updates ...", package.name()));
 
-            let update_result = match package.kind {
-                PackageKind::PyPi => PyPiUpdater::new(config).and_then(|u| u.update(package, Some(&pb))),
-                PackageKind::GitHub => GitHubRelease::new(config).and_then(|u| u.update(package, Some(&pb))),
-                PackageKind::Cargo => Cargo::new(config).and_then(|u| u.update(package, Some(&pb))),
-                PackageKind::Npm => NpmUpdater::new(config).and_then(|u| u.update(package, Some(&pb))),
-                PackageKind::Go => GoUpdater::new(config).and_then(|u| u.update(package, Some(&pb))),
-                PackageKind::Git => GitRepository::new(config).and_then(|u| u.update(package, Some(&pb))),
-            };
+                    let update_result = match package.kind {
+                        PackageKind::PyPi => PyPiUpdater::new(config).and_then(|u| u.update(package, Some(&pb))),
+                        PackageKind::GitHub => GitHubRelease::new(config).and_then(|u| u.update(package, Some(&pb))),
+                        PackageKind::Cargo => Cargo::new(config).and_then(|u| u.update(package, Some(&pb))),
+                        PackageKind::Npm => NpmUpdater::new(config).and_then(|u| u.update(package, Some(&pb))),
+                        PackageKind::Go => GoUpdater::new(config).and_then(|u| u.update(package, Some(&pb))),
+                        PackageKind::Git => GitRepository::new(config).and_then(|u| u.update(package, Some(&pb))),
+                    };
 
-            if let Err(e) = update_result {
-                pb.suspend(|| error!(package = %package.name, "Update failed: {e}"));
-                package.result.failed(format!("Update error: {e}"));
+                    if let Err(e) = update_result {
+                        pb.suspend(|| error!(package = %package.name, "Update failed: {e}"));
+                        package.result.failed(format!("Update error: {e}"));
+                    }
+
+                    pb.finish_and_clear();
+                    debug!(package = %package.name, elapsed_ms = t0.elapsed().as_millis(), "Update check finished");
+                });
             }
-        }
+        });
+    }
 
-        if !config.dry_run
-            && (package.result.status.contains(&UpdateStatus::Updated) || config.force || config.build_only)
-            && let Err(e) = build_package(package, &pb, build_path, config.cache)
-        {
-            pb.suspend(|| error!(package = %package.name, "Build failed: {e}"));
-            package.result.failed(format!("Build error: {e}"));
-        }
+    if config.dry_run {
+        return;
+    }
 
-        pb.finish_and_clear();
-    });
+    packages
+        .par_iter_mut()
+        .filter(|package| package.result.status.contains(&UpdateStatus::Updated) || config.force || config.build_only)
+        .for_each(|package| {
+            let pb = spinner(format!("{}: Building ...", package.name()));
+
+            if let Err(e) = build_package(package, &pb, build_path, config.cache) {
+                pb.suspend(|| error!(package = %package.name, "Build failed: {e}"));
+                package.result.failed(format!("Build error: {e}"));
+            }
+
+            pb.finish_and_clear();
+        });
 }
 
 fn print_results(packages: &[Package]) {

@@ -1,10 +1,10 @@
 use git_url_parse::GitUrl;
 use git_url_parse::types::provider::GenericProvider;
 use octocrab::Octocrab;
+use reqwest::header::{ACCEPT, HeaderMap, HeaderValue};
 use rootcause::Result;
 use serde::Deserialize;
 
-const DEFAULT_BRANCHES: [&str; 2] = ["main", "master"];
 
 #[derive(Debug, Deserialize)]
 struct CargoToml {
@@ -23,7 +23,7 @@ pub struct GitHubClient {
 
 impl GitHubClient {
     pub fn new() -> Result<Self> {
-        let runtime = tokio::runtime::Runtime::new()?;
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
 
         let client = runtime.block_on(async {
             let mut builder = Octocrab::builder();
@@ -101,41 +101,13 @@ impl GitHubClient {
     pub fn latest_commit(&self, url: &GitUrl) -> Result<Option<String>> {
         let (owner, repo) = Self::owner_and_repo_from_url(url)?;
 
+        // `HEAD` resolves to the default branch; the sha media type returns only the commit id.
+        let headers = HeaderMap::from_iter([(ACCEPT, HeaderValue::from_static("application/vnd.github.sha"))]);
+
         self.runtime.block_on(async {
-            // First try to get the default branch
-            if let Ok(repo_info) = self.client.repos(&owner, &repo).get().await {
-                let default_branch = repo_info.default_branch.as_deref().unwrap_or("main");
-
-                // Get the commit SHA for the default branch
-                match self
-                    .client
-                    .repos(&owner, &repo)
-                    .get_ref(&octocrab::params::repos::Reference::Branch(default_branch.to_string()))
-                    .await
-                {
-                    Ok(git_ref) => match &git_ref.object {
-                        octocrab::models::repos::Object::Commit { sha, .. } => Ok(Some(sha.clone())),
-                        _ => Ok(None),
-                    },
-                    Err(_) => Ok(None),
-                }
-            } else {
-                // Fallback: try common branch names
-                for branch in &DEFAULT_BRANCHES {
-                    let Ok(git_ref) = self
-                        .client
-                        .repos(&owner, &repo)
-                        .get_ref(&octocrab::params::repos::Reference::Branch((*branch).to_string()))
-                        .await
-                    else {
-                        continue;
-                    };
-
-                    if let octocrab::models::repos::Object::Commit { sha, .. } = &git_ref.object {
-                        return Ok(Some(sha.clone()));
-                    }
-                }
-                Ok(None)
+            match self.client._get_with_headers(format!("/repos/{owner}/{repo}/commits/HEAD"), Some(headers)).await {
+                Ok(response) if response.status().is_success() => Ok(Some(self.client.body_to_string(response).await?.trim().to_string())),
+                _ => Ok(None),
             }
         })
     }
