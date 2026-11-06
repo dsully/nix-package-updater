@@ -76,9 +76,8 @@ impl GitHubClient {
         Ok((provider.owner().clone(), provider.repo().clone()))
     }
 
-    /// GET `route`, revalidating a cached body with `If-None-Match`. 404 and 409 (empty repository) are `None`.
-    async fn get_cached(&self, route: String, accept: Option<&'static str>) -> Result<Option<String>> {
-        let key = format!("{route} {}", accept.unwrap_or_default());
+    /// GET `route`, revalidating the body cached under `key` with `If-None-Match`. 404 and 409 (empty repository) are `None`.
+    async fn get_cached(&self, route: String, key: String, accept: Option<&'static str>) -> Result<Option<String>> {
         let cached = self.cache.get(&key);
 
         let mut headers = HeaderMap::new();
@@ -115,7 +114,8 @@ impl GitHubClient {
         let (owner, repo) = Self::owner_and_repo_from_url(url)?;
 
         self.runtime.block_on(async {
-            let Some(body) = self.get_cached(format!("/repos/{owner}/{repo}/releases/latest"), None).await? else {
+            let route = format!("/repos/{owner}/{repo}/releases/latest");
+            let Some(body) = self.get_cached(route.clone(), route, None).await? else {
                 return Ok(None);
             };
 
@@ -168,9 +168,11 @@ impl GitHubClient {
         let (owner, repo) = Self::owner_and_repo_from_url(url)?;
 
         // `HEAD` resolves to the default branch; the sha media type returns only the commit id.
+        let route = format!("/repos/{owner}/{repo}/commits/HEAD");
+
         self.runtime.block_on(async {
             Ok(self
-                .get_cached(format!("/repos/{owner}/{repo}/commits/HEAD"), Some("application/vnd.github.sha"))
+                .get_cached(route.clone(), route, Some("application/vnd.github.sha"))
                 .await?
                 .map(|sha| sha.trim().to_string()))
         })
@@ -180,19 +182,16 @@ impl GitHubClient {
     pub fn cargo_version(&self, url: &GitUrl, commit: &str) -> Result<Option<String>> {
         let (owner, repo) = Self::owner_and_repo_from_url(url)?;
 
+        let route = format!("/repos/{owner}/{repo}/contents/Cargo.toml?ref={commit}");
+        // One entry per repository, not per commit, so the cache stays bounded.
+        let key = format!("/repos/{owner}/{repo}/contents/Cargo.toml");
+
         self.runtime.block_on(async {
-            match self.client.repos(&owner, &repo).get_content().path("Cargo.toml").r#ref(commit).send().await {
-                Ok(content) => {
-                    if let Some(item) = content.items.first()
-                        && let Some(decoded) = item.decoded_content()
-                        && let Ok(cargo_toml) = Figment::from(Toml::string(&decoded)).extract::<CargoToml>()
-                    {
-                        return Ok(Some(cargo_toml.package.version));
-                    }
-                    Ok(None)
-                }
-                Err(_) => Ok(None),
-            }
+            let Some(manifest) = self.get_cached(route, key, Some("application/vnd.github.raw")).await? else {
+                return Ok(None);
+            };
+
+            Ok(Figment::from(Toml::string(&manifest)).extract::<CargoToml>().ok().map(|toml| toml.package.version))
         })
     }
 }
