@@ -106,8 +106,19 @@ impl Cargo {
             return Ok(());
         }
 
-        // Update using nurl
-        let Some((new_hash, _)) = Nix::hash_and_rev(&package.homepage.to_string(), Some(&latest_git_commit))? else {
+        let (hash_and_rev, release_tag, cargo_version) = std::thread::scope(|s| {
+            let hash_and_rev = s.spawn(|| Nix::hash_and_rev(&package.homepage.to_string(), Some(&latest_git_commit)));
+            let release_tag = s.spawn(|| self.github_client.latest_release(&package.homepage));
+            let cargo_version = self.github_client.cargo_version(&package.homepage, &latest_git_commit);
+
+            (
+                hash_and_rev.join().expect("nurl thread panicked"),
+                release_tag.join().expect("latest_release thread panicked"),
+                cargo_version,
+            )
+        });
+
+        let Some((new_hash, _)) = hash_and_rev? else {
             package.result.failed("Failed to get new hash");
             return Ok(());
         };
@@ -118,14 +129,8 @@ impl Cargo {
         ast.update_git(Some(&current_git_commit), &latest_git_commit, &new_hash, None)?;
 
         // Get version from multiple sources and use the highest one
-        let release_version = self
-            .github_client
-            .latest_release(&package.homepage)
-            .ok()
-            .flatten()
-            .map(|tag| normalize_version(&package.name, &tag));
-
-        let cargo_version = self.github_client.cargo_version(&package.homepage, &latest_git_commit).ok().flatten();
+        let release_version = release_tag.ok().flatten().map(|tag| normalize_version(&package.name, &tag));
+        let cargo_version = cargo_version.ok().flatten();
 
         // Pick the higher version, or fall back to short hash for non-semantic packages
         let latest_version = match (&release_version, &cargo_version) {

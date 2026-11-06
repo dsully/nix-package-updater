@@ -118,20 +118,29 @@ impl Updater for GitHubRelease {
         let url_template = ast.get("url").filter(|url| url.contains("${source."));
         let repo_path = package.homepage.path();
 
-        for block in platform_blocks {
-            let Some(old_hash) = block.attributes.get("hash") else {
-                continue;
-            };
+        let targets: Vec<(&String, String)> = platform_blocks
+            .iter()
+            .filter_map(|block| {
+                let old_hash = block.attributes.get("hash")?;
 
-            let url = if let Some(template) = &url_template {
-                asset_url(template, &package.name, &latest_version, &block.attributes)
-            } else if let Some(filename) = release_asset_filename(&package.name, &block.platform_name, &block.attributes) {
-                format!("https://github.com/{repo_path}/releases/download/{latest_tag}/{filename}")
-            } else {
-                continue;
-            };
+                let url = if let Some(template) = &url_template {
+                    asset_url(template, &package.name, &latest_version, &block.attributes)
+                } else {
+                    let filename = release_asset_filename(&package.name, &block.platform_name, &block.attributes)?;
+                    format!("https://github.com/{repo_path}/releases/download/{latest_tag}/{filename}")
+                };
 
-            if let Some(new_hash) = Nix::prefetch_hash(&url)? {
+                Some((old_hash, url))
+            })
+            .collect();
+
+        let new_hashes: Vec<_> = std::thread::scope(|s| {
+            let handles: Vec<_> = targets.iter().map(|(_, url)| s.spawn(|| Nix::prefetch_hash(url))).collect();
+            handles.into_iter().map(|h| h.join().expect("prefetch thread panicked")).collect()
+        });
+
+        for ((old_hash, url), new_hash) in targets.iter().zip(new_hashes) {
+            if let Some(new_hash) = new_hash? {
                 ast.set("hash", old_hash, &new_hash)?;
             } else {
                 package.result.failed(format!("Failed to get hash for {url}"));
