@@ -16,6 +16,18 @@ pub struct NpmUpdater {
     github_client: GitHubClient,
 }
 
+/// Without a `rev` attribute, the commit is tracked as the `<base>-<short hash>` version suffix this updater writes.
+fn npm_package_is_current(force: bool, current_rev: Option<&str>, latest_rev: Option<&str>, version: &str) -> bool {
+    let Some(latest) = latest_rev.filter(|_| !force) else {
+        return false;
+    };
+
+    match current_rev {
+        Some(current) => current == latest,
+        None => version.rsplit_once('-').is_some_and(|(_, suffix)| suffix == short_hash(latest)),
+    }
+}
+
 impl Updater for NpmUpdater {
     fn new(config: &Config) -> Result<Self> {
         Ok(Self {
@@ -31,9 +43,7 @@ impl Updater for NpmUpdater {
         let current_git_commit = ast_tmp.get("rev");
         let latest_git_commit = self.github_client.latest_commit(&package.homepage)?;
 
-        if let (Some(current), Some(latest)) = (&current_git_commit, &latest_git_commit)
-            && self.should_skip_update(self.force, current, latest)
-        {
+        if npm_package_is_current(self.force, current_git_commit.as_deref(), latest_git_commit.as_deref(), &package.version) {
             package.result.up_to_date();
             return Ok(());
         }
@@ -114,4 +124,38 @@ fn save_package_lock(nix_path: &Path, content: &str) -> Result<()> {
     fs::write(&package_lock_path, content)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::npm_package_is_current;
+
+    const LATEST: &str = "cc9a0821351d60162ab09c5eb5c8a87321f7d718";
+
+    #[test]
+    fn current_when_version_suffix_matches_latest_commit_without_rev() {
+        assert!(npm_package_is_current(false, None, Some(LATEST), "2.23.0-cc9a0821"));
+    }
+
+    #[test]
+    fn not_current_when_version_suffix_differs_without_rev() {
+        assert!(!npm_package_is_current(false, None, Some(LATEST), "2.23.0-deadbeef"));
+    }
+
+    #[test]
+    fn not_current_when_version_has_no_hash_suffix() {
+        assert!(!npm_package_is_current(false, None, Some(LATEST), "2.23.0"));
+    }
+
+    #[test]
+    fn rev_comparison_wins_when_rev_present() {
+        assert!(npm_package_is_current(false, Some(LATEST), Some(LATEST), "2.23.0-deadbeef"));
+        assert!(!npm_package_is_current(false, Some("abc"), Some(LATEST), "2.23.0-cc9a0821"));
+    }
+
+    #[test]
+    fn never_current_when_forced_or_latest_unknown() {
+        assert!(!npm_package_is_current(true, Some(LATEST), Some(LATEST), "2.23.0-cc9a0821"));
+        assert!(!npm_package_is_current(false, None, None, "2.23.0-cc9a0821"));
+    }
 }

@@ -4,7 +4,7 @@ use git_url_parse::GitUrl;
 use git_url_parse::types::provider::GenericProvider;
 use octocrab::Octocrab;
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue};
-use rootcause::Result;
+use rootcause::{Result, report};
 use serde::Deserialize;
 
 
@@ -107,9 +107,16 @@ impl GitHubClient {
         let headers = HeaderMap::from_iter([(ACCEPT, HeaderValue::from_static("application/vnd.github.sha"))]);
 
         self.runtime.block_on(async {
-            match self.client._get_with_headers(format!("/repos/{owner}/{repo}/commits/HEAD"), Some(headers)).await {
-                Ok(response) if response.status().is_success() => Ok(Some(self.client.body_to_string(response).await?.trim().to_string())),
-                _ => Ok(None),
+            let response = self.client._get_with_headers(format!("/repos/{owner}/{repo}/commits/HEAD"), Some(headers)).await?;
+
+            match response.status().as_u16() {
+                200..=299 => Ok(Some(self.client.body_to_string(response).await?.trim().to_string())),
+                // 409: the repository is empty.
+                404 | 409 => Ok(None),
+                _ => match octocrab::map_github_error(response).await {
+                    Err(octocrab::Error::GitHub { source, .. }) => Err(report!("GitHub {}: {}", source.status_code, source.message)),
+                    other => other.map(|_| None).map_err(Into::into),
+                },
             }
         })
     }
