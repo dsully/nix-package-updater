@@ -9,7 +9,7 @@ use crate::updater::{Updater, normalize_version};
 
 pub struct GoUpdater {
     force: bool,
-    github_client: GitHubClient,
+    github_client: &'static GitHubClient,
 }
 
 fn go_package_is_current(force: bool, current_rev: Option<&str>, latest_rev: Option<&str>, current_version: &str, latest_version: Option<&str>) -> bool {
@@ -20,7 +20,7 @@ impl Updater for GoUpdater {
     fn new(config: &Config) -> Result<Self> {
         Ok(Self {
             force: config.force,
-            github_client: GitHubClient::new()?,
+            github_client: GitHubClient::shared()?,
         })
     }
 

@@ -10,7 +10,7 @@ use crate::updater::{Updater, normalize_version};
 
 pub struct GitHubRelease {
     force: bool,
-    client: GitHubClient,
+    client: &'static GitHubClient,
 }
 
 fn release_asset_filename(package_name: &str, platform_name: &str, attributes: &std::collections::HashMap<String, String>) -> Option<String> {
@@ -80,7 +80,7 @@ impl Updater for GitHubRelease {
     fn new(config: &Config) -> Result<Self> {
         Ok(Self {
             force: config.force,
-            client: GitHubClient::new()?,
+            client: GitHubClient::shared()?,
         })
     }
 

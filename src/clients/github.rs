@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use figment::Figment;
 use figment::providers::{Format, Toml};
 use git_url_parse::GitUrl;
@@ -24,7 +26,15 @@ pub struct GitHubClient {
 }
 
 impl GitHubClient {
-    pub fn new() -> Result<Self> {
+    /// One client for the whole process: building it loads the native root certificates, which
+    /// is slow and serialized on macOS when `SSL_CERT_FILE` is unset.
+    pub fn shared() -> Result<&'static Self> {
+        static CLIENT: OnceLock<std::result::Result<GitHubClient, String>> = OnceLock::new();
+
+        CLIENT.get_or_init(|| Self::new().map_err(|e| e.to_string())).as_ref().map_err(|e| report!("{e}"))
+    }
+
+    fn new() -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
 
         let client = runtime.block_on(async {

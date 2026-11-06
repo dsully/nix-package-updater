@@ -10,7 +10,7 @@ use crate::updater::{Updater, normalize_version, short_hash, version_is_greater}
 
 pub struct Cargo {
     force: bool,
-    github_client: GitHubClient,
+    github_client: &'static GitHubClient,
     crates_client: CratesIoClient,
 }
 
@@ -22,7 +22,7 @@ impl Updater for Cargo {
     fn new(config: &Config) -> Result<Self> {
         Ok(Self {
             force: config.force,
-            github_client: GitHubClient::new()?,
+            github_client: GitHubClient::shared()?,
             crates_client: CratesIoClient::new()?,
         })
     }

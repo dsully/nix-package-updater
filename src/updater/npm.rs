@@ -13,7 +13,7 @@ use crate::updater::{Updater, short_hash};
 pub struct NpmUpdater {
     force: bool,
     npm_client: NpmClient,
-    github_client: GitHubClient,
+    github_client: &'static GitHubClient,
 }
 
 /// Without a `rev` attribute, the commit is tracked as the `<base>-<short hash>` version suffix this updater writes.
@@ -33,7 +33,7 @@ impl Updater for NpmUpdater {
         Ok(Self {
             force: config.force,
             npm_client: NpmClient::new()?,
-            github_client: GitHubClient::new()?,
+            github_client: GitHubClient::shared()?,
         })
     }
 
