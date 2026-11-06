@@ -43,7 +43,8 @@ The flake uses crane with a separated `buildDepsOnly`/`buildPackage` strategy fo
   - `npm.rs` — npm packages (downloads package-lock.json, updates npmDepsHash)
   - `go.rs` — Go modules (buildGoModule, updates vendorHash)
   - `git.rs` — Generic git repository fallback
-- **`clients/`** — HTTP clients: `pypi.rs`, `github.rs` (octocrab with tokio async-to-sync wrapper), `crates.rs`, `npm.rs`, `nix.rs` (CLI wrapper for nix/nurl commands)
+- **`clients/`** — HTTP clients: `pypi.rs`, `github.rs` (one process-wide octocrab client via `GitHubClient::shared()`, a current_thread tokio runtime driven from many threads), `crates.rs`, `npm.rs`, `nix.rs` (CLI wrapper for nix/nurl commands)
+- **`clients/etag_cache.rs`** — GitHub `commits/HEAD` and `releases/latest` bodies are cached in `$XDG_CACHE_HOME/nix-package-updater/github-etags.json` and revalidated with `If-None-Match` (a 304 costs no rate-limit quota). `main` saves it after processing.
 
 ### Updater Trait
 

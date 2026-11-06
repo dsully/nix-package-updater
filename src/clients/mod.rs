@@ -1,4 +1,5 @@
 pub mod crates;
+pub mod etag_cache;
 pub mod github;
 pub mod nix;
 pub mod npm;

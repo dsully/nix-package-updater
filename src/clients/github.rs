@@ -1,15 +1,16 @@
 use std::sync::OnceLock;
 
 use figment::Figment;
+
 use figment::providers::{Format, Toml};
 use git_url_parse::GitUrl;
 use git_url_parse::types::provider::GenericProvider;
 use octocrab::Octocrab;
-use reqwest::header::{ACCEPT, HeaderMap, HeaderValue};
+use reqwest::header::{ACCEPT, ETAG, HeaderMap, HeaderValue, IF_NONE_MATCH};
 use rootcause::{Result, report};
 use serde::Deserialize;
 
-
+use crate::clients::etag_cache::{Entry, EtagCache};
 #[derive(Debug, Deserialize)]
 struct CargoToml {
     package: CargoPackage,
@@ -23,15 +24,29 @@ struct CargoPackage {
 pub struct GitHubClient {
     client: Octocrab,
     runtime: tokio::runtime::Runtime,
+    cache: EtagCache,
+}
+
+static CLIENT: OnceLock<std::result::Result<GitHubClient, String>> = OnceLock::new();
+
+#[derive(Debug, Deserialize)]
+struct Release {
+    tag_name: String,
 }
 
 impl GitHubClient {
     /// One client for the whole process: building it loads the native root certificates, which
     /// is slow and serialized on macOS when `SSL_CERT_FILE` is unset.
     pub fn shared() -> Result<&'static Self> {
-        static CLIENT: OnceLock<std::result::Result<GitHubClient, String>> = OnceLock::new();
-
         CLIENT.get_or_init(|| Self::new().map_err(|e| e.to_string())).as_ref().map_err(|e| report!("{e}"))
+    }
+
+    /// Persist the ETag cache if the shared client was used.
+    pub fn save_cache() -> Result<()> {
+        match CLIENT.get() {
+            Some(Ok(client)) => client.cache.save(),
+            _ => Ok(()),
+        }
     }
 
     fn new() -> Result<Self> {
@@ -48,7 +63,11 @@ impl GitHubClient {
             builder.build()
         })?;
 
-        Ok(Self { client, runtime })
+        Ok(Self {
+            client,
+            runtime,
+            cache: EtagCache::load(EtagCache::default_path()),
+        })
     }
 
     fn owner_and_repo_from_url(url: &GitUrl) -> Result<(String, String)> {
@@ -57,15 +76,50 @@ impl GitHubClient {
         Ok((provider.owner().clone(), provider.repo().clone()))
     }
 
+    /// GET `route`, revalidating a cached body with `If-None-Match`. 404 and 409 (empty repository) are `None`.
+    async fn get_cached(&self, route: String, accept: Option<&'static str>) -> Result<Option<String>> {
+        let key = format!("{route} {}", accept.unwrap_or_default());
+        let cached = self.cache.get(&key);
+
+        let mut headers = HeaderMap::new();
+        if let Some(accept) = accept {
+            headers.insert(ACCEPT, HeaderValue::from_static(accept));
+        }
+        if let Some(etag) = cached.as_ref().and_then(|entry| HeaderValue::from_str(&entry.etag).ok()) {
+            headers.insert(IF_NONE_MATCH, etag);
+        }
+
+        let response = self.client._get_with_headers(route, Some(headers)).await?;
+
+        match response.status().as_u16() {
+            304 if let Some(entry) = cached => Ok(Some(entry.body)),
+            200..=299 => {
+                let etag = response.headers().get(ETAG).and_then(|v| v.to_str().ok()).map(str::to_string);
+                let body = self.client.body_to_string(response).await?;
+
+                if let Some(etag) = etag {
+                    self.cache.insert(key, Entry { etag, body: body.clone() });
+                }
+
+                Ok(Some(body))
+            }
+            404 | 409 => Ok(None),
+            _ => match octocrab::map_github_error(response).await {
+                Err(octocrab::Error::GitHub { source, .. }) => Err(report!("GitHub {}: {}", source.status_code, source.message)),
+                other => other.map(|_| None).map_err(Into::into),
+            },
+        }
+    }
+
     pub fn latest_release(&self, url: &GitUrl) -> Result<Option<String>> {
         let (owner, repo) = Self::owner_and_repo_from_url(url)?;
 
         self.runtime.block_on(async {
-            match self.client.repos(owner, repo).releases().get_latest().await {
-                Ok(release) => Ok(Some(release.tag_name)),
-                Err(octocrab::Error::GitHub { source, .. }) if source.status_code == 404 => Ok(None),
-                Err(e) => Err(e.into()),
-            }
+            let Some(body) = self.get_cached(format!("/repos/{owner}/{repo}/releases/latest"), None).await? else {
+                return Ok(None);
+            };
+
+            Ok(Some(serde_json::from_str::<Release>(&body)?.tag_name))
         })
     }
 
@@ -114,20 +168,11 @@ impl GitHubClient {
         let (owner, repo) = Self::owner_and_repo_from_url(url)?;
 
         // `HEAD` resolves to the default branch; the sha media type returns only the commit id.
-        let headers = HeaderMap::from_iter([(ACCEPT, HeaderValue::from_static("application/vnd.github.sha"))]);
-
         self.runtime.block_on(async {
-            let response = self.client._get_with_headers(format!("/repos/{owner}/{repo}/commits/HEAD"), Some(headers)).await?;
-
-            match response.status().as_u16() {
-                200..=299 => Ok(Some(self.client.body_to_string(response).await?.trim().to_string())),
-                // 409: the repository is empty.
-                404 | 409 => Ok(None),
-                _ => match octocrab::map_github_error(response).await {
-                    Err(octocrab::Error::GitHub { source, .. }) => Err(report!("GitHub {}: {}", source.status_code, source.message)),
-                    other => other.map(|_| None).map_err(Into::into),
-                },
-            }
+            Ok(self
+                .get_cached(format!("/repos/{owner}/{repo}/commits/HEAD"), Some("application/vnd.github.sha"))
+                .await?
+                .map(|sha| sha.trim().to_string()))
         })
     }
 

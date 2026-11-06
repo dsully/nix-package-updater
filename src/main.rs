@@ -30,6 +30,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+use crate::clients::GitHubClient;
 use crate::nix::builder::build_package;
 use crate::package::{Package, PackageKind, UpdateStatus};
 use crate::updater::Updater;
@@ -284,6 +285,10 @@ fn main() -> Result<()> {
     let build_path = PathBuf::from("build-results");
 
     process_packages(&mut packages, &config, &build_path);
+
+    if let Err(e) = GitHubClient::save_cache() {
+        warn!("Failed to save GitHub ETag cache: {e}");
+    }
 
     if packages.iter().all(|p| p.result.status.contains(&UpdateStatus::UpToDate)) {
         println!("{}", "No packages needed updating.".yellow());
