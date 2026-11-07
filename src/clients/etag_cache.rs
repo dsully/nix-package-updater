@@ -34,11 +34,7 @@ impl EtagCache {
         let entries = path
             .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
-            .and_then(|content| {
-                serde_json::from_str(&content)
-                    .inspect_err(|e| debug!("Ignoring unreadable ETag cache: {e}"))
-                    .ok()
-            })
+            .and_then(|content| serde_json::from_str(&content).inspect_err(|e| debug!("Ignoring unreadable ETag cache: {e}")).ok())
             .unwrap_or_default();
 
         Self {
@@ -83,7 +79,7 @@ impl EtagCache {
 
 #[cfg(test)]
 mod tests {
-    use super::{EtagCache, Entry};
+    use super::{Entry, EtagCache};
 
     fn entry(etag: &str) -> Entry {
         Entry {

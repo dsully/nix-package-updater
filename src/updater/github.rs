@@ -37,6 +37,13 @@ fn asset_url(template: &str, package_name: &str, version: &str, attributes: &std
         })
 }
 
+/// The release asset a platform-independent package fetches; `None` when `url` is not a release download.
+fn single_asset_url(template: &str, package_name: &str, version: &str) -> Option<String> {
+    template
+        .contains("/releases/download/")
+        .then(|| asset_url(template, package_name, version, &std::collections::HashMap::new()))
+}
+
 impl GitHubRelease {
     /// Nix fetchers cannot authenticate, so download the asset here and add it to the store for `requireFile`.
     fn update_required_file(&self, package: &mut Package, mut ast: Ast, tag: &str, version: &str) -> Result<()> {
@@ -107,12 +114,20 @@ impl Updater for GitHubRelease {
 
         let platform_blocks = ast.platforms();
 
-        if platform_blocks.is_empty()
-            && let Some((new_hash, _)) = Nix::hash_and_rev(&format!("{}/archive/refs/tags/{latest_tag}.tar.gz", package.homepage), None)
+        if platform_blocks.is_empty() {
+            if let Some(url) = ast.get("url").and_then(|template| single_asset_url(&template, &package.name, &latest_version)) {
+                let Some(new_hash) = Nix::prefetch_hash(&url)? else {
+                    package.result.failed(format!("Failed to get hash for {url}"));
+                    return Ok(());
+                };
+
+                ast.set("hash", &package.nix_hash, &new_hash)?;
+            } else if let Some((new_hash, _)) = Nix::hash_and_rev(&format!("{}/archive/refs/tags/{latest_tag}.tar.gz", package.homepage), None)
                 .ok()
                 .flatten()
-        {
-            ast.set("hash", &package.nix_hash, &new_hash)?;
+            {
+                ast.set("hash", &package.nix_hash, &new_hash)?;
+            }
         }
 
         let url_template = ast.get("url").filter(|url| url.contains("${source."));
@@ -159,7 +174,25 @@ impl Updater for GitHubRelease {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{asset_url, release_asset_filename};
+    use super::{asset_url, release_asset_filename, single_asset_url};
+
+    #[test]
+    fn single_asset_url_renders_release_download_template() {
+        assert_eq!(
+            single_asset_url(
+                "https://github.com/skaft-software/octet/releases/download/v${version}/${pname}-${version}.tar.gz",
+                "octet-pi-compat",
+                "0.10.4"
+            )
+            .as_deref(),
+            Some("https://github.com/skaft-software/octet/releases/download/v0.10.4/octet-pi-compat-0.10.4.tar.gz")
+        );
+    }
+
+    #[test]
+    fn single_asset_url_ignores_source_archives() {
+        assert_eq!(single_asset_url("https://github.com/o/r/archive/refs/tags/v${version}.tar.gz", "r", "1.0.0"), None);
+    }
 
     #[test]
     fn asset_url_fills_template_from_platform_attributes() {

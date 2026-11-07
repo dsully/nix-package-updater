@@ -1,7 +1,6 @@
 use std::sync::OnceLock;
 
 use figment::Figment;
-
 use figment::providers::{Format, Toml};
 use git_url_parse::GitUrl;
 use git_url_parse::types::provider::GenericProvider;
