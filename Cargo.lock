@@ -1289,7 +1289,7 @@ dependencies = [
 
 [[package]]
 name = "nix-package-updater"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "base64 0.23.1",
  "clap",

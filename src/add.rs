@@ -264,7 +264,6 @@ in
       mainProgram = "{binary}";
     }};
   }}
-}}
 "#,
         license = args.license
     )))
