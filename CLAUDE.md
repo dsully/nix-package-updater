@@ -40,7 +40,7 @@ The flake uses crane with a separated `buildDepsOnly`/`buildPackage` strategy fo
   - `pypi.rs` — PyPI packages (handles platform-specific wheels)
   - `github.rs` — GitHub release-based packages
   - `cargo.rs` — Rust crates (both fetchCrate and git-based)
-  - `npm.rs` — npm packages (downloads package-lock.json, updates npmDepsHash)
+  - `npm.rs` — npm packages (downloads package-lock.json, updates npmDepsHash). An `npmjs.com/package/<name>` homepage uses the registry `latest` version instead of GitHub, and regenerates the local lockfile with `npm` from PATH
   - `go.rs` — Go modules (buildGoModule, updates vendorHash)
   - `git.rs` — Generic git repository fallback
 - **`clients/`** — HTTP clients: `pypi.rs`, `github.rs` (one process-wide octocrab client via `GitHubClient::shared()`, a current_thread tokio runtime driven from many threads), `crates.rs`, `npm.rs`, `nix.rs` (CLI wrapper for nix/nurl commands)

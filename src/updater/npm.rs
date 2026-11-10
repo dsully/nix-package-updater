@@ -1,8 +1,10 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
+use git_url_parse::GitUrl;
 use indicatif::ProgressBar;
-use rootcause::{Result, report};
+use rootcause::{Result, bail, report};
 
 use crate::Config;
 use crate::clients::nix::Nix;
@@ -38,6 +40,10 @@ impl Updater for NpmUpdater {
     }
 
     fn update(&self, package: &mut Package, pb: Option<&ProgressBar>) -> Result<()> {
+        if let Some(name) = registry_package_name(&package.homepage).map(str::to_string) {
+            return self.update_registry(package, &name, pb);
+        }
+
         let ast_tmp = package.ast();
 
         let current_git_commit = ast_tmp.get("rev");
@@ -109,9 +115,82 @@ impl Updater for NpmUpdater {
     }
 }
 
+impl NpmUpdater {
+    /// Update a local wrapper whose package.json pins a registry package at the Nix `version`.
+    fn update_registry(&self, package: &mut Package, name: &str, pb: Option<&ProgressBar>) -> Result<()> {
+        let Some(latest_version) = self.npm_client.latest_version(name)? else {
+            package.result.failed("Package not found on the npm registry");
+            return Ok(());
+        };
+
+        if self.should_skip_update(self.force, &package.version, &latest_version) {
+            package.result.up_to_date();
+            return Ok(());
+        }
+
+        if !package.dry_run {
+            if let Some(pb) = pb {
+                pb.set_message(format!("{}: Regenerating package-lock.json...", package.name()));
+            }
+
+            pin_registry_dependency(&package.path, name, &package.version, &latest_version)?;
+        }
+
+        let mut ast = package.ast();
+
+        if package.version != latest_version {
+            ast.set("version", &package.version, &latest_version)?;
+        }
+
+        ast.clear_vendor_hash("npmDeps")?;
+        ast.update_vendor(package, "npmDeps", pb)?;
+
+        package.write(&ast)?;
+
+        package.result.version(Some(&package.version), Some(&latest_version));
+
+        Ok(())
+    }
+}
+
 /// Whether the package definition vendors a standalone `./package-lock.json`.
 fn references_package_lock(content: &str) -> bool {
     content.contains("package-lock.json")
+}
+
+/// The npm package name of an `npmjs.com/package/<name>` homepage.
+fn registry_package_name(homepage: &GitUrl) -> Option<&str> {
+    if !matches!(homepage.host()?, "www.npmjs.com" | "npmjs.com") {
+        return None;
+    }
+
+    homepage
+        .path()
+        .strip_prefix("/package/")
+        .map(|name| name.trim_end_matches('/'))
+        .filter(|name| !name.is_empty())
+}
+
+/// Pins `name` at `version` in the package.json next to the Nix file and regenerates its package-lock.json.
+fn pin_registry_dependency(nix_path: &Path, name: &str, old_version: &str, version: &str) -> Result<()> {
+    let dir = nix_path.parent().ok_or_else(|| report!("Could not get parent directory of Nix file"))?;
+
+    let manifest: serde_json::Value = serde_json::from_str(&fs::read_to_string(dir.join("package.json"))?)?;
+    if manifest["version"].as_str() == Some(old_version) {
+        run_npm(dir, &["pkg", "set", &format!("version={version}")])?;
+    }
+
+    run_npm(dir, &["install", "--package-lock-only", "--ignore-scripts", "--save-exact", &format!("{name}@{version}")])
+}
+
+fn run_npm(dir: &Path, args: &[&str]) -> Result<()> {
+    let output = Command::new("npm").args(args).current_dir(dir).output()?;
+
+    if !output.status.success() {
+        bail!("npm {} failed: {}", args.join(" "), String::from_utf8_lossy(&output.stderr).trim());
+    }
+
+    Ok(())
 }
 
 /// Save package-lock.json next to the Nix file
@@ -128,7 +207,29 @@ fn save_package_lock(nix_path: &Path, content: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::npm_package_is_current;
+    use git_url_parse::GitUrl;
+
+    use super::{npm_package_is_current, registry_package_name};
+
+    fn registry_name(url: &str) -> Option<String> {
+        registry_package_name(&GitUrl::parse(url).unwrap()).map(str::to_string)
+    }
+
+    #[test]
+    fn registry_name_from_npmjs_homepage() {
+        assert_eq!(
+            registry_name("https://www.npmjs.com/package/@earendil-works/pi-coding-agent").as_deref(),
+            Some("@earendil-works/pi-coding-agent")
+        );
+        assert_eq!(registry_name("https://npmjs.com/package/socket.io/").as_deref(), Some("socket.io"));
+    }
+
+    #[test]
+    fn no_registry_name_for_other_homepages() {
+        assert_eq!(registry_name("https://github.com/owner/repo"), None);
+        assert_eq!(registry_name("https://www.npmjs.com/settings/owner"), None);
+        assert_eq!(registry_name("https://www.npmjs.com/package/"), None);
+    }
 
     const LATEST: &str = "cc9a0821351d60162ab09c5eb5c8a87321f7d718";
 

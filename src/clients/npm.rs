@@ -1,5 +1,11 @@
 use reqwest::blocking::Client;
 use rootcause::{Result, bail};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct RegistryVersion {
+    version: String,
+}
 
 pub struct NpmClient {
     client: Client,
@@ -27,6 +33,24 @@ impl NpmClient {
                 }
             }
             Err(e) => bail!("Failed to download package-lock.json: {e}"),
+        }
+    }
+
+    /// The `latest` dist-tag version of `name` on the npm registry; scoped names need no escaping.
+    pub fn latest_version(&self, name: &str) -> Result<Option<String>> {
+        let url = format!("https://registry.npmjs.org/{name}/latest");
+
+        match self.client.get(&url).send() {
+            Ok(response) => {
+                if response.status().is_success() {
+                    Ok(Some(response.json::<RegistryVersion>()?.version))
+                } else if response.status().as_u16() == 404 {
+                    Ok(None)
+                } else {
+                    bail!("npm registry returned status: {}", response.status())
+                }
+            }
+            Err(e) => bail!("Failed to fetch npm registry data: {e}"),
         }
     }
 }
