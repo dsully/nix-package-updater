@@ -4,6 +4,7 @@ mod clients;
 mod nix;
 mod package;
 mod updater;
+mod status;
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -33,10 +34,12 @@ use tracing_subscriber::util::SubscriberInitExt;
 use crate::clients::GitHubClient;
 use crate::nix::builder::build_package;
 use crate::package::{Package, PackageKind, UpdateStatus};
+use crate::status::State;
 use crate::updater::Updater;
 use crate::updater::cargo::Cargo;
 use crate::updater::git::GitRepository;
 use crate::updater::github::GitHubRelease;
+
 use crate::updater::go::GoUpdater;
 use crate::updater::npm::NpmUpdater;
 use crate::updater::pypi::PyPiUpdater;
@@ -191,6 +194,8 @@ fn process_packages(packages: &mut [Package], config: &Config, build_path: &Path
         return;
     }
 
+    status::report(State::Working, "Building updated packages");
+
     packages
         .par_iter_mut()
         .filter(|package| package.result.status.contains(&UpdateStatus::Updated) || config.force || config.build_only)
@@ -284,7 +289,15 @@ fn main() -> Result<()> {
 
     let build_path = PathBuf::from("build-results");
 
+    status::report(State::Working, &format!("Checking {} packages", packages.len()));
     process_packages(&mut packages, &config, &build_path);
+
+    let failed = packages.iter().filter(|p| p.result.status.contains(&UpdateStatus::Failed)).count();
+    if failed == 0 {
+        status::report(State::Done, "All packages processed");
+    } else {
+        status::report(State::Error, &format!("{failed} packages failed"));
+    }
 
     if let Err(e) = GitHubClient::save_cache() {
         warn!("Failed to save GitHub ETag cache: {e}");
